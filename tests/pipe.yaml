@@ -1,0 +1,15 @@
+- parameters:
+    - executable: example/exec_example.py
+    - output_directory: esub_test_dir
+
+- name: job1
+  cmd: esub $[executable] --tasks='0 > 2' --mode=run --function=all --output_directory=$[output_directory]
+
+- name: jobloop1
+  loop: [0, 2]
+  items:
+    - name: loopjob1
+      cmd: esub $[executable] --tasks='0 > 2' --n_cores=2 --mode=run-tasks --function=all --output_directory=$[output_directory]
+
+    - name: loopjob2
+      cmd: esub $[executable] --tasks='0 > {{{} + 1}}' --mode=run --function=all --output_directory=$[output_directory]

@@ -1,0 +1,969 @@
+#! /usr/bin/env python
+
+# Copyright (C) 2019 ETH Zurich,
+# Institute for Particle Physics and Astrophysics
+# Author: Dominik Zuercher
+
+# System imports
+from __future__ import (print_function, division, absolute_import,
+                        unicode_literals)
+
+# package import
+import argparse
+import math
+import os
+import sys
+import collections
+import subprocess
+import shlex
+import time
+
+from esub import utils
+
+LOGGER = utils.get_logger(__file__)
+TIMEOUT_MESSAGE = 'Maximum number of pending jobs reached, ' \
+                  'will sleep for 30 minutes and retry'
+
+
+def starter_message():
+    print()
+    print(' ______   _______   _    _   _______ ')
+    print('|  ____| |  _____| | |  | | |  _    |')
+    print('| |___   | |_____  | |  | | | |_|  _|')
+    print('|  ___|  |_____  | | |  | | |  _  |_ ')
+    print('| |____   _____| | | |__| | | |_|   |')
+    print('|______| |_______| \\______/ |_______|')
+    print()
+
+
+def decimal_hours_to_str(dec_hours):
+    """Transforms decimal hours into the hh:mm format
+
+    :param dec_hours: decimal hours, float or int
+    :return: string in the format hh:mm
+    """
+
+    full_hours = math.floor(dec_hours)
+    minutes = math.ceil((dec_hours - full_hours) * 60)
+
+    if minutes == 60:
+        full_hours += 1
+        minutes = 0
+
+    if minutes < 10:
+        time_str = '{}:0{}'.format(full_hours, minutes)
+    else:
+        time_str = '{}:{}'.format(full_hours, minutes)
+
+    return time_str
+
+def get_jobchainer_function_flow(args):
+    """
+    Gets the configuration for jobchainer flow submission.
+    :param args: Command line arguments are parsed
+    :return: a list of configurations to run, the items of the list are
+    list_functions[0]: commant to run, main, merge, missing, or something else
+    list_functions[1]: start condition, empty (default), after or along the previous job
+    list_functions[2]: number of cores to use for that command
+    list_functions[3]: index of the rerun
+    list_functions[4]: filename of the indices file
+    """
+
+    def add_reruns(n_rerun):
+
+        import numpy as np
+        n_cores_rerun = int(np.ceil(args.n_cores*0.1))
+        for nr in range(1, n_rerun+1):
+            list_functions['missing{:d}'.format(nr)] = {'fun': 'missing',  'dep': 'main{:d}'.format(nr-1), 'start': """numended({jid:s},*)""", 'ncor': 1, 'find': filepath_indices}
+            filepath_indices_rerun = utils.get_filepath_indices_rerun(args)
+            list_functions['main{:d}'.format(nr)] =   {'fun': 'main',     'dep': 'missing{:d}'.format(nr), 'start': """numended({jid:s},*)""", 'ncor': n_cores_rerun, 'find': filepath_indices_rerun}
+
+    list_functions = collections.OrderedDict()
+
+    filepath_indices = utils.get_filepath_indices(args)
+    indices = utils.read_indices_yaml(filepath_indices)
+
+    if args.merge_depenency_mode == 'after':
+        merge_start = """numended({jid:s},*)"""
+        if args.n_rerun_missing==0:
+            merge_dep = 'main0'
+        else:
+            merge_dep = 'main{:d}'.format(args.n_rerun_missing)
+
+    elif args.merge_depenency_mode == 'along':
+        merge_start = """(numended({jid:s}, > 0) || numrun({jid:s}, > 0))"""
+        merge_dep = 'main0'
+    else:
+        raise Exception('unknown args.merge_depenency_mode={}'.format(args.merge_depenency_mode))
+
+    if args.function == 'all':
+
+        list_functions['main0']  = {'fun': 'main',   'dep': '', 'start': '', 'ncor': args.n_cores, 'find': filepath_indices}
+        add_reruns(args.n_rerun_missing)
+        list_functions['merge0'] = {'fun': 'merge',  'dep': merge_dep, 'start': merge_start, 'ncor': 1, 'find': filepath_indices}
+
+    else:
+
+        for fun in args.function:
+
+            if fun == 'missing' or fun == 'merge' :
+                nc = 1
+            elif fun == 'main':
+                nc = args.n_cores
+            else:
+                nc = args.n_cores
+
+            list_functions[fun]  = {'fun': fun,   'dep': '', 'start': '', 'ncor': nc, 'find': filepath_indices}
+
+    return list_functions
+
+
+
+
+def make_resource_string(function, main_memory, main_time,
+                         main_scratch, watchdog_memory, watchdog_time,
+                         watchdog_scratch, merge_memory,
+                         merge_time, merge_scratch, system):
+    """
+    Creates the part of the submission string which handles
+    the allocation of ressources
+
+    :param function: The name of the function defined
+                     in the executable that will be submitted
+    :param main_memory: Memory per core to allocate for the main job
+    :param main_time: The Wall time requested for the main job
+    :param main_scratch: Scratch per core to allocate for the main job
+    :param watchdog_memory: Memory per core to allocate for the watchdog job
+    :param watchdog_time: The Wall time requested for the watchdog job
+    :param watchdog_scratch: Scratch to allocate for the watchdog job
+    :param merge_memory: Memory per core to allocate for the merge job
+    :param merge_time: The Wall time requested for the merge job
+    :param merge_scratch: Scratch to allocate for the merge job
+    :param system: The type of the queing system of the cluster
+    :return: A string that is part of the submission string.
+    """
+
+    if function == 'main':
+        mem = main_memory
+        time = main_time
+        scratch = main_scratch
+    elif function == 'watchdog':
+        mem = watchdog_memory
+        time = watchdog_time
+        scratch = watchdog_scratch
+    elif function == 'merge':
+        mem = merge_memory
+        time = merge_time
+        scratch = merge_scratch
+    elif function == 'rerun_missing':
+        mem = main_memory
+        time = main_time
+        scratch = main_scratch
+    elif function == 'missing':
+        mem = merge_memory
+        time = merge_time
+        scratch = merge_scratch
+    else:
+        mem = main_memory
+        time = main_time
+        scratch = main_scratch
+
+    if system == 'bsub':
+        resource_string = '-W {} -R rusage[mem={}] ' \
+                          '-R rusage[scratch={}]'.format(
+                              decimal_hours_to_str(time), mem, scratch)
+
+    return resource_string
+
+
+def get_log_filenames(log_dir, job_name, function):
+    """
+    Builds the filenames of the stdout and stderr log files for a
+    given job name and a given function to run.
+
+    :param log_dir: directory where the logs are stored
+    :param job_name: Name of the job that will write to the log files
+    :param function: Function that will be executed
+    :return: filenames for stdout and stderr logs
+    """
+    job_name_ext = job_name + '_' + function
+    stdout_log = os.path.join(log_dir, '{}.o'.format(job_name_ext))
+    stderr_log = os.path.join(log_dir, '{}.e'.format(job_name_ext))
+    return stdout_log, stderr_log
+
+
+def get_source_cmd(source_file):
+    """
+    Builds the command to source a given file if the file exists,
+    otherwise returns an empty string.
+
+    :param source_file: path to the (possibly non-existing) source file,
+                        can be relative and can contain "~"
+    :return: command to source the file if it exists or empty string
+    """
+
+    source_file_abs = os.path.abspath(os.path.expanduser(source_file))
+
+    if os.path.isfile(source_file_abs):
+        source_cmd = 'source {}; '.format(source_file_abs)
+    else:
+        LOGGER.info('Source file {} not found, skipping'.format(source_file))
+        source_cmd = ''
+
+    return source_cmd
+
+
+def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
+                    function_args, exe, main_memory, main_time,
+                    main_scratch, watchdog_time, watchdog_memory,
+                    watchdog_scratch, merge_memory, merge_time,
+                    merge_scratch, log_dir, dependency,
+                    system, main_name='main', log_filenames=[]):
+    """
+    Creates the submission string which gets submitted to the queing system
+
+    :param function: The name of the function defined in the
+                     executable that will be submitted
+    :param source_file: A file which gets executed
+                        before running the actual function(s)
+    :param n_cores: The number of cores that will be requested for the job
+    :param tasks: The task string, which will get parsed into the job indices
+    :param mode: The mode in which the job will be
+                 ran (MPI-job or as a jobarray)
+    :param job_name: The name of the job
+    :param function_args: The remaining arguments that
+                          will be forwarded to the executable
+    :param exe: The path of the executable
+    :param main_memory: Memory per core to allocate for the main job
+    :param main_time: The Wall time requested for the main job
+    :param main_scratch: Scratch per core to allocate for the main job
+    :param watchdog_memory: Memory per core to allocate for the watchdog job
+    :param watchdog_time: The Wall time requested for the watchdog job
+    :param watchdog_scratch: Scratch to allocate for the watchdog job
+    :param merge_memory: Memory per core to allocate for the merge job
+    :param merge_time: The Wall time requested for the merge job
+    :param log_dir: log_dir: The path to the log directory
+    :param merge_scratch: Scratch to allocate for the merge job
+    :param dependency: The dependency string
+    :param system: The type of the queing system of the cluster
+    :param main_name: name of the main function
+    :return: The submission string that wil get submitted to the cluster
+    """
+
+    # allocate computing resources
+    resource_string = make_resource_string(function, main_memory, main_time,
+                                           main_scratch, watchdog_memory,
+                                           watchdog_time, watchdog_scratch,
+                                           merge_memory, merge_time,
+                                           merge_scratch, system)
+
+    # get the job name for the submission system and the log files
+    job_name_ext = job_name + '_' + function
+    if len(log_filenames)==0:
+        stdout_log, stderr_log = get_log_filenames(log_dir, job_name, function)
+    else:
+        stdout_log, stderr_log = log_filenames
+
+    # construct the string of arguments passed to the executable
+    args_string = ''
+    for arg in function_args:
+        args_string += arg + ' '
+
+    # make submission string
+    source_cmd = get_source_cmd(source_file)
+
+    if system == 'bsub':
+        if (mode == 'mpi') & (function == 'main'):
+            cmd_string = 'bsub -o {} -e {} -J {} -n {} {} {} \"{} mpirun ' \
+                'python -m esub.submit_mpi --log_dir={} ' \
+                         '--job_name={} --executable={} --tasks=\'{}\' ' \
+                         '--main_name={} {}\"'. \
+                format(stdout_log, stderr_log, job_name_ext, n_cores,
+                       resource_string, dependency, source_cmd, log_dir,
+                       job_name, exe, tasks, main_name, args_string)
+        else:
+            cmd_string = 'bsub -r -o {} -e {} -J {}[1-{}] {} {} \"{} python ' \
+                         '-m esub.submit_jobarray --job_name={} ' \
+                         '--source_file={} --main_memory={} --main_time={} ' \
+                         '--main_scratch={} --function={} ' \
+                         '--executable={} --tasks=\'{}\' --n_cores={} ' \
+                         '--log_dir={} --system={} --main_name={} {}\"'. \
+                format(stdout_log, stderr_log, job_name_ext, n_cores,
+                       resource_string, dependency, source_cmd, job_name,
+                       source_file, main_memory, main_time, main_scratch,
+                       function, exe, tasks, n_cores, log_dir,
+                       system, main_name, args_string)
+
+    return cmd_string
+
+
+def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
+               source_file='', n_cores=1, job_name='job', main_memory=100,
+               main_time=1, main_scratch=1000, watchdog_memory=100,
+               watchdog_time=1, watchdog_scratch=1000, merge_memory=100,
+               merge_time=1, merge_scratch=1000, dependency='', system='bsub',
+               main_name='main', log_filenames=[]):
+    """
+    Based on arguments gets the submission string and submits it to the cluster
+
+    :param tasks: The task string, which will get parsed into the job indices
+    :param mode: The mode in which the job will be ran
+                 (MPI-job or as a jobarray)
+    :param exe: The path of the executable
+    :param log_dir: The path to the log directory
+    :param function_args: The remaining arguments that will
+                          be forwarded to the executable
+    :param function: The name of the function defined in the
+                     executable that will be submitted
+    :param source_file: A file which gets executed before
+                        running the actual function(s)
+    :param n_cores: The number of cores that will be requested for the job
+    :param job_name: The name of the job
+    :param main_memory: Memory per core to allocate for the main job
+    :param main_time: The Wall time requested for the main job
+    :param main_scratch: Scratch per core to allocate for the main job
+    :param watchdog_memory: Memory per core to allocate for the watchdog job
+    :param watchdog_time: The Wall time requested for the watchdog job
+    :param watchdog_scratch: Scratch to allocate for the watchdog job
+    :param merge_memory: Memory per core to allocate for the merge job
+    :param merge_time: The Wall time requested for the merge job
+    :param merge_scratch: Scratch to allocate for the merge job
+    :param dependency: The jobids of the jobs on which this job depends on
+    :param system: The type of the queing system of the cluster
+    :param main_name: name of the main function
+    :return: The jobid of the submitted job
+    """
+
+    # get submission string
+    cmd_string = make_cmd_string(function, source_file, n_cores, tasks, mode,
+                                 job_name, function_args, exe,
+                                 main_memory, main_time, main_scratch,
+                                 watchdog_time, watchdog_memory,
+                                 watchdog_scratch,
+                                 merge_memory, merge_time, merge_scratch,
+                                 log_dir, dependency, system, main_name, log_filenames)
+
+    LOGGER.info(
+        "####################### Submitting command to queing system "
+        "#######################")
+    LOGGER.info(cmd_string)
+
+    # message the system sends if the
+    # maximum number of pendings jobs is reached
+    if system == 'bsub':
+        msg_limit_reached = 'Pending job threshold reached.'
+        pipe_limit_reached = 'stderr'
+
+    # submit
+    while True:
+
+        output = dict(stdout=[], stderr=[])
+
+        with subprocess.Popen(shlex.split(cmd_string),
+                              stdout=subprocess.PIPE,
+                              stderr=subprocess.PIPE,
+                              bufsize=1,
+                              universal_newlines=True) as proc:
+
+            # check for limit concerning maximum number of pending jobs
+            for line in getattr(proc, pipe_limit_reached):
+
+                pending_limit_reached = msg_limit_reached in line
+                if pending_limit_reached:
+                    break
+                else:
+                    output[pipe_limit_reached].append(line)
+
+            # if the limit has been reached, kill process and sleep
+            if pending_limit_reached:
+                proc.kill()
+                LOGGER.info(TIMEOUT_MESSAGE)
+                time.sleep(60 * 30)
+                continue
+
+            # read rest of the output
+            for line in proc.stdout:
+                output['stdout'].append(line)
+            for line in proc.stderr:
+                output['stderr'].append(line)
+
+            break
+
+    # check if process terminated successfully
+    if proc.returncode != 0:
+        raise RuntimeError('Running the command \"{}\" failed with'
+                           'exit code {}. Error: \n{}'.
+                           format(cmd_string, proc.returncode,
+                                  '\n'.join(output['stderr'])))
+
+    # get id of submitted job (bsub-only up to now)
+    jobid = output['stdout'][-1].split('<')[1]
+    jobid = jobid.split('>')[0]
+    jobid = int(jobid)
+
+    LOGGER.info("Submitted job and got jobid: {}".format(jobid))
+
+    return jobid
+
+
+def get_dependency_string(function, jobids, ext_dependencies, system):
+    """
+    Constructs the dependency string which handles which other jobs
+    this job is dependent on.
+
+    :param function: The type o function to submit
+    :param jobids: Dictionary of the jobids for each job already submitted
+    :param ext_dependencies: If external dependencies are given they get
+                             added to the dependency string
+                             (this happens if epipe is used)
+    :param system: The type of the queing system of the cluster
+    :return: A sting which is used as a substring for the submission string
+             and it handles the dependencies of the job
+    """
+    if system == 'bsub':
+        dep_string = '-w "'
+        # no dependencies for main
+        if function == 'main':
+            if ext_dependencies != '':
+                dep_string = '"-w' + ext_dependencies + '"'
+            else:
+                dep_string = ''
+            return dep_string
+        # watchdog starts along with main
+        elif function == 'watchdog':
+            if 'main' in jobids.keys():
+                dep_string += '{}({})'.format('started', jobids['main'])
+            else:
+                LOGGER.info("Function {} has not been submitted -> Skipping "
+                            "in dependencies for {}".format('main', function))
+        # rerun missing starts after main
+        elif function == 'rerun_missing':
+            if 'main' in jobids.keys():
+                dep_string += '{}({})'.format('ended', jobids['main'])
+            else:
+                LOGGER.info("Function {} has not been submitted -> Skipping "
+                            "in dependencies for {}".format('main', function))
+        # merge starts after all the others
+        elif function == 'merge':
+            if 'main' in jobids.keys():
+                dep_string += '{}({}) && '.format('ended', jobids['main'])
+            else:
+                LOGGER.info("Function {} has not been submitted -> Skipping "
+                            "in dependencies for {}".format('main', function))
+            if 'watchdog' in jobids.keys():
+                dep_string += '{}({}) && '.format('ended', jobids['watchdog'])
+            else:
+                LOGGER.info("Function {} has not been submitted -> Skipping "
+                            "in dependencies for {}".format('watchdog',
+                                                            function))
+            if 'rerun_missing' in jobids.keys():
+                dep_string += '{}({}) && '.format('ended',
+                                                  jobids['rerun_missing'])
+            else:
+                LOGGER.info("Function {} has not been submitted -> Skipping "
+                            "in dependencies for {}".format('rerun_missing',
+                                                            function))
+            if len(dep_string) > 4:
+                dep_string = dep_string[:-4]
+        else:
+            raise ValueError("Dependencies for function {} "
+                             "not defined".format(function))
+        if ext_dependencies != '':
+            dep_string = dep_string + " && " + ext_dependencies
+        dep_string += '"'
+    return dep_string
+
+def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources):
+    """
+    Run the specifications for jobchainer flow.
+
+    :param args: Command line arguments are parsed
+    :executable: Executable to be run
+    :function_args: Function args to be passed to executable
+    :path_finished: file holding finished indices
+    :log_dir: directory for logs
+    :resources: dict with resources
+    """
+
+    def add_dependency(dep_string, new_dep):
+        if new_dep!='':
+            if dep_string=='':
+                dep_string+=new_dep
+            else:
+                dep_string+=' && {}'.format(new_dep)
+        return dep_string
+    def finalise_deps(dep_string):
+        if dep_string!='':
+            dep_string = """-w '{}'""".format(dep_string)
+        return dep_string
+
+
+
+    list_functions = get_jobchainer_function_flow(args)
+
+    # CASE 1 : run locally
+    if (args.mode == 'run'):
+
+        for ii, item_name in enumerate(list_functions):
+
+            dc = list_functions[item_name]
+
+            indices = utils.read_indices_yaml(dc['find'])
+
+            if len(indices)>0:
+
+                if len(indices) == len(range(indices[0],indices[-1]+1)):
+                    LOGGER.info("Running on tasks: {} > {}".format(indices[0], indices[-1]))
+                else:
+                    LOGGER.info("Running on tasks: {}".format(indices))
+
+            else:
+                LOGGER.info("Running on tasks: {}".format(indices))
+
+            if dc['fun'] == 'main':
+
+                for index in getattr(executable, args.main_name)(indices, function_args):
+                    LOGGER.info("##################### Finished Task {} #####################".format(index))
+
+            elif dc['fun'] == 'missing':
+
+                indices_missing = getattr(executable, dc['fun'])(indices, function_args)
+                filepath_indices_rerun = utils.get_filepath_indices_rerun(args)
+                utils.write_indices_yaml(filepath_indices_rerun, indices_missing)
+
+            elif dc['fun'] == 'merge':
+
+                getattr(executable, dc['fun'])(indices, function_args)
+
+            else:
+
+                getattr(executable, dc['fun'])(indices, function_args)
+
+
+
+    # CASE 2 and 3 : running jobs on cluster (jobarray)
+    elif (args.mode == 'jobarray'):
+
+        jobids = collections.OrderedDict()
+
+        for ii, item_name in enumerate(list_functions):
+
+            dc = list_functions[item_name]
+
+            LOGGER.info("Submitting {} job to {} core(s)".format(dc['fun'], dc['ncor']))
+
+            # reset logs
+            LOGGER.info('Resetting log files')
+            stdout_log, stderr_log = get_log_filenames(log_dir, args.job_name, item_name)
+            utils.robust_remove(stdout_log)
+            utils.robust_remove(stderr_log)
+
+            dep_string = add_dependency(dep_string='', new_dep=args.dependency)
+            if dc['dep'] in jobids:
+                dep_string = add_dependency(dep_string=dep_string, new_dep=dc['start'].format(jid=str(jobids[dc['dep']])))
+            else:
+                if dc['dep']!='':
+                    raise Exception('could not find dependency {} for item {}, jobids: {}'.format(dc['dep'], item_name, str(jobids)))
+            dep_string = finalise_deps(dep_string)
+
+
+            jobid = submit_job(dc['find'], args.mode, args.exec, log_dir, function_args,
+                               function=dc['fun'],
+                               source_file=args.source_file,
+                               n_cores=dc['ncor'],
+                               job_name=args.job_name,
+                               dependency=dep_string,
+                               system=args.system,
+                               main_name=args.main_name,
+                               log_filenames=[stdout_log, stderr_log],
+                               **resources)
+
+            jobids[item_name] = jobid
+            # LOGGER.critical("Submitted job {} for function {} as jobid {}".format(item_name, dc['fun'], jobid))
+            print("Submitted job {} for function {} as jobid {}".format(item_name, dc['fun'], jobid))
+
+def run_esub_flow(args, executable, function_args, path_finished, log_dir, path_log, resources):
+    """
+    Run the specifications for run_esub_flow flow.
+
+    :param args: Command line arguments are parsed
+    :executable: Executable to be run
+    :function_args: Function args to be passed to executable
+    :path_finished: file holding finished indices
+    :log_dir: directory for logs
+    :path_log: path to log file
+    :resources: dict with resources
+    """
+
+    mode = args.mode
+    main_name = args.main_name
+    job_name = args.job_name
+    source_file = args.source_file
+    tasks = args.tasks
+    exe = args.exec
+    n_cores = args.n_cores
+    function = args.function
+    system = args.system
+    ext_dependencies = args.dependency
+
+    # check if required function exists. Otherwise skip it
+    overwrite_log = False
+    if function == 'all':
+        # overwrite log files
+        overwrite_log = True
+        if mode == 'mpi':
+            function = ['main', 'watchdog', 'merge']
+        else:
+            function = ['main', 'rerun_missing', 'watchdog', 'merge']
+    for func in function:
+        if func == 'rerun_missing':
+            continue
+        elif func == 'main':
+            if not hasattr(executable, main_name):
+                LOGGER.info(
+                    "Did not find main function {} in the executable. "
+                    "Skipping it...".format(main_name))
+                function.remove(func)
+        else:
+            if not hasattr(executable, func):
+                LOGGER.info(
+                    "Did not find function {} in the executable. "
+                    "Skipping it...".format(func))
+                function.remove(func)
+    if len(function) == 0:
+        LOGGER.info("No funciton to run found. Exiting...")
+        sys.exit(0)
+
+    # CASE 1 : run locally
+    if (mode == 'run') | (mode == 'run-mpi') | (mode == 'run-tasks'):
+        LOGGER.info("Running the function(s) {} "
+                    "specified in executable".format(
+                        ', '.join(function)))
+
+        # getting index list
+        indices = utils.get_indices(tasks)
+        LOGGER.info("Running on tasks: {}".format(indices))
+
+        # loop over functions
+        for f in function:
+
+            indices_use = indices
+
+            # check if function is specified
+            if f == 'main' or f == 'rerun_missing':
+                function_found = hasattr(executable, main_name)
+            else:
+                function_found = hasattr(executable, f)
+
+            if not function_found:
+                LOGGER.info(
+                    "The requested function {} is missing in the executable. "
+                    "Skipping...".format(f))
+                continue
+
+            if f == 'main':
+                # resetting missing file
+                LOGGER.info("Resetting file holding finished indices")
+                utils.robust_remove(path_finished)
+
+            if f == 'rerun_missing':
+                indices_use = utils.check_indices(
+                    indices, path_finished, executable, function_args, LOGGER)
+                if len(indices_use) > 0:
+                    LOGGER.info("Rerunning tasks: {}".format(indices_use))
+                    f = 'main'
+                else:
+                    LOGGER.info('All indices are finished, nothing to re-run.')
+                    continue
+
+            if f == 'main':
+
+                if mode == 'run':
+                    for index in getattr(executable, main_name)(indices,
+                                                                function_args):
+                        utils.write_index(index, path_finished)
+                        LOGGER.info(
+                            "##################### Finished Task {} "
+                            "#####################".format(index))
+
+                elif mode == 'run-mpi':
+                    utils.run_local_mpi_job(
+                        exe, n_cores, function_args, LOGGER, main_name)
+                    LOGGER.info(
+                        "##################### Finished "
+                        "#####################")
+
+                elif mode == 'run-tasks':
+                    dones = utils.run_local_mpi_tasks(
+                        executable, n_cores, function_args, tasks, main_name,
+                        LOGGER)
+                    for index in dones:
+                        utils.write_index(index, path_finished)
+                        LOGGER.info(
+                            "##################### Finished Task {} "
+                            "#####################".format(index))
+
+            else:
+                getattr(executable, f)(indices_use, function_args)
+
+
+    # CASE 2 and 3 : running jobs on cluster (MPI or jobarray)
+    elif (mode == 'jobarray') | (mode == 'mpi'):
+        jobids = collections.OrderedDict()
+        for ii, f in enumerate(function):
+            if f == 'main' or f == 'rerun_missing':
+                function_found = hasattr(executable, main_name)
+            else:
+                function_found = hasattr(executable, f)
+
+            if not function_found:
+                LOGGER.info(
+                    "The requested function {} is missing in the executable. "
+                    "Skipping...".format(f))
+                continue
+
+            if f == 'main':
+                # resetting missing file
+                LOGGER.info("Resetting file holding finished indices")
+                utils.robust_remove(path_finished)
+                n_cores_use = n_cores
+            else:
+                n_cores_use = 1
+
+            LOGGER.info(
+                "Submitting {} job to {} core(s)".format(f, n_cores_use))
+
+            # reset logs
+            LOGGER.info('Resetting log files')
+            stdout_log, stderr_log = get_log_filenames(log_dir, job_name, f)
+            utils.robust_remove(stdout_log)
+            utils.robust_remove(stderr_log)
+
+            # the current job depends at most on the previous one
+            # (e.g., rerun_missing does not need to wait for the
+            # watchdog to finish)
+            dependency = get_dependency_string(f, jobids, ext_dependencies,
+                                               system)
+
+            jobid = submit_job(tasks, mode, exe, log_dir, function_args,
+                               function=f,
+                               source_file=source_file,
+                               n_cores=n_cores_use,
+                               job_name=job_name,
+                               dependency=dependency,
+                               system=system,
+                               main_name=main_name,
+                               **resources)
+            jobids[f] = jobid
+            LOGGER.info(
+                "Submitted job for function {} as jobid {}".format(f, jobid))
+
+        # write to log
+        if overwrite_log:
+            utils.write_to_log(
+                path_log, 'esub arguments: \n{}'.format(args), mode='w')
+            utils.write_to_log(
+                path_log, 'function arguments: \n{}'.format(function_args))
+
+        for fun, jobid in jobids.items():
+            utils.write_to_log(path_log, 'Job id {}: {}'.format(fun, jobid))
+
+def main(args=None):
+    """
+    Main function of esub.
+
+    :param args: Command line arguments are parsed
+    """
+
+    if args is None:
+        args = sys.argv[1:]
+
+    # Make log directory if non existing
+    log_dir = os.path.join(os.getcwd(), 'esub_logs')
+    if not os.path.isdir(log_dir):
+        os.makedirs(log_dir)
+        LOGGER.info('Created directory {}'.format(log_dir))
+
+    # initializing parser
+    description = "This is esub an user friendly and flexible tool to " \
+                  "submit jobs to a cluster or run them locally"
+    parser = argparse.ArgumentParser(description=description, add_help=True)
+
+    resources = dict(main_memory=1000,
+                     main_time=4,
+                     main_time_per_index=None,
+                     main_scratch=2000,
+                     watchdog_memory=1000,
+                     watchdog_time=4,
+                     watchdog_scratch=2000,
+                     merge_memory=1000,
+                     merge_time=4,
+                     merge_scratch=2000)
+
+    # parse all the submitter arguments
+    parser.add_argument(
+        'exec', type=str, help='path to the executable (python file '
+                               'containing functions main, watchdog, merge)')
+    parser.add_argument('--mode', type=str, default='run',
+                        choices=('run', 'jobarray', 'mpi',
+                                 'run-mpi', 'run-tasks'),
+                        help='The mode in which to operate. '
+                        'Choices: run, jobarray, mpi, run-mpi, '
+                        'run-tasks')
+    parser.add_argument('--job_name', type=str, default='job',
+                        help='Individual name for this job. CAUTION: '
+                             'Multiple jobs with same name'
+                             'can confuse system!')
+    parser.add_argument('--source_file', type=str, default='source_esub.sh',
+                        help='Optionally provide a source file which '
+                        'gets executed first (loading modules, '
+                        'declaring environemental variables and so on')
+    parser.add_argument('--main_memory', type=float,
+                        default=resources['main_memory'],
+                        help='Memory allocated per core for main job in MB')
+    parser.add_argument('--main_time', type=float,
+                        default=resources['main_time'],
+                        help='Job run time limit in hours for main job')
+    parser.add_argument('--main_time_per_index', type=float,
+                        default=resources['main_time_per_index'],
+                        help='Job run time limit in hours for main '
+                             'job per index, overwrites main_time if set')
+    parser.add_argument('--main_scratch', type=float,
+                        default=resources['main_scratch'],
+                        help='Local scratch for allocated for main job')
+    parser.add_argument('--watchdog_memory', type=float,
+                        default=resources['watchdog_memory'],
+                        help='Memory allocated per core '
+                             'for watchdog job in MB')
+    parser.add_argument('--watchdog_time', type=float,
+                        default=resources['watchdog_time'],
+                        help='Job run time limit in hours for watchdog job')
+    parser.add_argument('--watchdog_scratch', type=float,
+                        default=resources['watchdog_scratch'],
+                        help='Local scratch for allocated for watchdog job')
+    parser.add_argument('--merge_memory', type=float,
+                        default=resources['merge_memory'],
+                        help='Memory allocated per core for merge job in MB')
+    parser.add_argument('--merge_time', type=float,
+                        default=resources['merge_time'],
+                        help='Job run time limit in hours for merge job')
+    parser.add_argument('--merge_scratch', type=float,
+                        default=resources['merge_scratch'],
+                        help='Local scratch for allocated for merge job')
+    parser.add_argument('--function', type=str, default=['main'], nargs='+',
+                        choices=('main', 'watchdog', 'merge', 'missing', 'rerun_missing',
+                                 'all'),
+                        help='The functions that should be executed. '
+                        'Choices: main, watchdog, merge, rerun_missing, all')
+    parser.add_argument('--main_name', type=str, default='main',
+                        help='Name of the main function in the executable')
+    parser.add_argument('--tasks', type=str, default='0',
+                        help='Task string from which the indices are parsed. '
+                             'Either single index, list of indices or range '
+                             'looking like int1 > int2')
+    parser.add_argument('--n_cores', type=int, default=1,
+                        help='The number of cores to request')
+    parser.add_argument('--dependency', type=str, default='',
+                        help='A dependency string that gets added to the '
+                             'dependencies (meant for pipelining)')
+    parser.add_argument('--system', type=str, default='bsub',
+                        choices=('bsub',),
+                        help='Type of the queing system '
+                             '(so far only know bsub)')
+    parser.add_argument('--n_rerun_missing', type=int, default=0,
+                        help='Number of reruns of the missing indices')
+    parser.add_argument('--merge_depenency_mode', type=str, default='after'),
+    parser.add_argument('-jc', '--jobchainer_flow', action='store_true',
+                        help='Use jobchainer submission flow')
+    args, function_args = parser.parse_known_args(args)
+
+    # mode = args.mode
+    # main_name = args.main_name
+    # job_name = args.job_name
+    # source_file = args.source_file
+    # tasks = args.tasks
+    # exe = args.exec
+    # n_cores = args.n_cores
+    # function = args.function
+    # system = args.system
+    # ext_dependencies = args.dependency
+    args.submit_dir = os.getcwd()
+
+    if len(args.function) == 1 and args.function[0] == 'all':
+        args.function = 'all'
+
+    # Make sure that executable exits
+    if os.path.isfile(args.exec):
+        if not os.path.isabs(args.exec):
+            args.exec = os.path.join(os.getcwd(), args.exec)
+    else:
+        raise FileNotFoundError('Please specify a valid path for executable')
+
+    starter_message()
+
+    # Set path to log file and to file storing finished main job ids
+    path_log = utils.get_path_log(log_dir, args.job_name)
+    path_finished = utils.get_path_finished_indices(log_dir, args.job_name)
+    LOGGER.info("Using log file {}".format(path_log))
+    LOGGER.info("Storing finished indices in file {}".format(path_finished))
+    LOGGER.info("Running in mode {}".format(args.mode))
+
+    # importing the functions from the executable
+    executable = utils.import_executable(args.exec)
+
+    # run setup if implemented
+    if hasattr(executable, 'setup'):
+        LOGGER.info('Running setup from executable')
+        getattr(executable, 'setup')(function_args)
+
+    # get resources from executable if implemented
+    res_update = dict()
+    if hasattr(executable, 'resources'):
+        LOGGER.info('Getting cluster resources from executable')
+        res_update = getattr(executable, 'resources')(function_args)
+
+    # overwrite with non-default command-line input
+    for res_name, res_default_val in resources.items():
+        res_cmd_line = getattr(args, res_name)
+        if res_cmd_line != res_default_val:
+            res_update[res_name] = res_cmd_line
+
+    resources.update(res_update)
+
+    # get indices
+
+    if args.jobchainer_flow == True:
+
+        if not os.path.isfile(args.tasks):
+            indices = utils.get_indices(args.tasks)
+        else:
+            indices = utils.read_indices_yaml(args.tasks)
+
+        filepath_indices = utils.get_filepath_indices(args)
+        utils.write_indices_yaml(filepath_indices, indices)
+        args.tasks = filepath_indices
+
+    else:
+
+        indices = utils.get_indices(args.tasks)
+
+    # fix main time
+
+    if resources['main_time_per_index'] is not None:
+            n_indices = len(indices)
+            resources['main_time'] = resources['main_time_per_index'] * math.ceil(n_indices / args.n_cores)
+
+    del resources['main_time_per_index']
+
+    # execute the function flow
+
+    if args.jobchainer_flow == True:
+
+        run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources)
+
+    else:
+
+        run_esub_flow(args, executable, function_args, path_finished, log_dir, path_log, resources)
+
+if __name__ == '__main__':
+    main()
