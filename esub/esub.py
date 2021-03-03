@@ -957,13 +957,13 @@ def main(args=None):
 
     # execute the function flow
 
-    if args.jobchainer_flow == True:
+    # if args.jobchainer_flow == True:
 
-        run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources)
+    run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources)
 
-    else:
+    # else:
 
-        run_esub_flow(args, executable, function_args, path_finished, log_dir, path_log, resources)
+        # run_esub_flow(args, executable, function_args, path_finished, log_dir, path_log, resources)
 
 if __name__ == '__main__':
     main()
