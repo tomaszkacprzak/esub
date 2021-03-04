@@ -304,7 +304,7 @@ def main(args=None):
 
     # read pipeline file
     with open(pipeline, 'r') as f:
-        pipeline = yaml.load(f)
+        pipeline = yaml.load(f, Loader=yaml.FullLoader)
 
     starter_message()
 

@@ -383,7 +383,7 @@ def write_indices_yaml(filepath_indices, indices):
 def read_indices_yaml(filepath_indices):
 
     with open(filepath_indices, 'r') as fin:
-        indices = yaml.load(fin)
+        indices = yaml.load(fin, Loader=yaml.FullLoader)
     LOGGER.info('read {} with {} indices'.format(filepath_indices, len(indices)))
     return indices
 
