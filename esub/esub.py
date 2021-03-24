@@ -120,10 +120,7 @@ def get_jobchainer_function_flow(args):
 
 
 
-def make_resource_string(function, main_memory, main_time,
-                         main_scratch, watchdog_memory, watchdog_time,
-                         watchdog_scratch, merge_memory,
-                         merge_time, merge_scratch, system):
+def make_resource_string(function, main_memory, main_time, main_scratch, watchdog_memory, main_nproc, watchdog_time, watchdog_scratch, watchdog_nproc, merge_memory, merge_time, merge_scratch, merge_nproc, system):
     """
     Creates the part of the submission string which handles
     the allocation of ressources
@@ -147,31 +144,35 @@ def make_resource_string(function, main_memory, main_time,
         mem = main_memory
         time = main_time
         scratch = main_scratch
+        nproc = main_nproc
     elif function == 'watchdog':
         mem = watchdog_memory
         time = watchdog_time
         scratch = watchdog_scratch
+        nproc = watchdog_nproc
     elif function == 'merge':
         mem = merge_memory
         time = merge_time
         scratch = merge_scratch
+        nproc = merge_nproc
     elif function == 'rerun_missing':
         mem = main_memory
         time = main_time
         scratch = main_scratch
+        nproc = main_nproc
     elif function == 'missing':
         mem = merge_memory
         time = merge_time
         scratch = merge_scratch
+        nproc = 1
     else:
         mem = main_memory
         time = main_time
         scratch = main_scratch
+        nproc = main_nproc
 
     if system == 'bsub':
-        resource_string = '-W {} -R rusage[mem={}] ' \
-                          '-R rusage[scratch={}]'.format(
-                              decimal_hours_to_str(time), mem, scratch)
+        resource_string = '-n {} -W {} -R rusage[mem={}] -R rusage[scratch={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch)
 
     return resource_string
 
@@ -215,9 +216,9 @@ def get_source_cmd(source_file):
 
 def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                     function_args, exe, main_memory, main_time,
-                    main_scratch, watchdog_time, watchdog_memory,
-                    watchdog_scratch, merge_memory, merge_time,
-                    merge_scratch, log_dir, dependency,
+                    main_scratch, main_nproc, watchdog_time, watchdog_memory,
+                    watchdog_scratch, watchdog_nproc, merge_memory, merge_time,
+                    merge_scratch, merge_nproc, log_dir, dependency,
                     system, main_name='main', log_filenames=[]):
     """
     Creates the submission string which gets submitted to the queing system
@@ -251,11 +252,11 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     """
 
     # allocate computing resources
-    resource_string = make_resource_string(function, main_memory, main_time,
-                                           main_scratch, watchdog_memory,
-                                           watchdog_time, watchdog_scratch,
-                                           merge_memory, merge_time,
-                                           merge_scratch, system)
+    resource_string = make_resource_string(function, 
+                                           main_memory, main_time, main_scratch, main_nproc, 
+                                           watchdog_memory, watchdog_time, watchdog_scratch, watchdog_nproc,
+                                           merge_memory, merge_time, merge_scratch, merge_nproc, 
+                                           system)
 
     # get the job name for the submission system and the log files
     job_name_ext = job_name + '_' + function
@@ -299,9 +300,9 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
 
 def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
                source_file='', n_cores=1, job_name='job', main_memory=100,
-               main_time=1, main_scratch=1000, watchdog_memory=100,
-               watchdog_time=1, watchdog_scratch=1000, merge_memory=100,
-               merge_time=1, merge_scratch=1000, dependency='', system='bsub',
+               main_time=1, main_nproc=1, main_scratch=1000, watchdog_memory=100,
+               watchdog_time=1, watchdog_scratch=1000, watchdog_nproc=1, merge_memory=100,
+               merge_time=1, merge_scratch=1000, merge_nproc=1, dependency='', system='bsub',
                main_name='main', log_filenames=[]):
     """
     Based on arguments gets the submission string and submits it to the cluster
@@ -337,10 +338,9 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
     # get submission string
     cmd_string = make_cmd_string(function, source_file, n_cores, tasks, mode,
                                  job_name, function_args, exe,
-                                 main_memory, main_time, main_scratch,
-                                 watchdog_time, watchdog_memory,
-                                 watchdog_scratch,
-                                 merge_memory, merge_time, merge_scratch,
+                                 main_memory, main_time, main_scratch, main_nproc,
+                                 watchdog_time, watchdog_memory, watchdog_scratch, watchdog_nproc,
+                                 merge_memory, merge_time, merge_scratch, merge_nproc,
                                  log_dir, dependency, system, main_name, log_filenames)
 
     LOGGER.info(
@@ -793,12 +793,15 @@ def main(args=None):
                      main_time=4,
                      main_time_per_index=None,
                      main_scratch=2000,
+                     main_nproc=1,
                      watchdog_memory=1000,
                      watchdog_time=4,
                      watchdog_scratch=2000,
+                     watchdog_nproc=1,
                      merge_memory=1000,
                      merge_time=4,
-                     merge_scratch=2000)
+                     merge_scratch=2000,
+                     merge_nproc=1)
 
     # parse all the submitter arguments
     parser.add_argument(
@@ -831,16 +834,21 @@ def main(args=None):
     parser.add_argument('--main_scratch', type=float,
                         default=resources['main_scratch'],
                         help='Local scratch for allocated for main job')
+    parser.add_argument('--main_nproc', type=float,
+                        default=resources['main_nproc'],
+                        help='Number of processors for each task for the main job')
     parser.add_argument('--watchdog_memory', type=float,
                         default=resources['watchdog_memory'],
-                        help='Memory allocated per core '
-                             'for watchdog job in MB')
+                        help='Memory allocated per core for watchdog job in MB')
     parser.add_argument('--watchdog_time', type=float,
                         default=resources['watchdog_time'],
                         help='Job run time limit in hours for watchdog job')
     parser.add_argument('--watchdog_scratch', type=float,
                         default=resources['watchdog_scratch'],
                         help='Local scratch for allocated for watchdog job')
+    parser.add_argument('--watchdog_nproc', type=float,
+                        default=resources['watchdog_nproc'],
+                        help='Number of processors for each task for the watchdog job')
     parser.add_argument('--merge_memory', type=float,
                         default=resources['merge_memory'],
                         help='Memory allocated per core for merge job in MB')
@@ -850,9 +858,11 @@ def main(args=None):
     parser.add_argument('--merge_scratch', type=float,
                         default=resources['merge_scratch'],
                         help='Local scratch for allocated for merge job')
+    parser.add_argument('--merge_nproc', type=float,
+                        default=resources['merge_nproc'],
+                        help='Number of processors for each task for the merge job')
     parser.add_argument('--function', type=str, default=['main'], nargs='+',
-                        choices=('main', 'watchdog', 'merge', 'missing', 'rerun_missing',
-                                 'all'),
+                        choices=('main', 'watchdog', 'merge', 'missing', 'rerun_missing', 'all'),
                         help='The functions that should be executed. '
                         'Choices: main, watchdog, merge, rerun_missing, all')
     parser.add_argument('--main_name', type=str, default='main',
