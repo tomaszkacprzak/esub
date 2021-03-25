@@ -120,7 +120,7 @@ def get_jobchainer_function_flow(args):
 
 
 
-def make_resource_string(function, main_memory, main_time, main_scratch, watchdog_memory, main_nproc, watchdog_time, watchdog_scratch, watchdog_nproc, merge_memory, merge_time, merge_scratch, merge_nproc, system):
+def make_resource_string(function, main_memory, main_time, main_scratch, main_nproc, watchdog_memory, watchdog_time, watchdog_scratch, watchdog_nproc, merge_memory, merge_time, merge_scratch, merge_nproc, system):
     """
     Creates the part of the submission string which handles
     the allocation of ressources
@@ -139,6 +139,7 @@ def make_resource_string(function, main_memory, main_time, main_scratch, watchdo
     :param system: The type of the queing system of the cluster
     :return: A string that is part of the submission string.
     """
+    import ipdb; ipdb.set_trace()
 
     if function == 'main':
         mem = main_memory
