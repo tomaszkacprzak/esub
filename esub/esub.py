@@ -139,7 +139,6 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
     :param system: The type of the queing system of the cluster
     :return: A string that is part of the submission string.
     """
-    import ipdb; ipdb.set_trace()
 
     if function == 'main':
         mem = main_memory
