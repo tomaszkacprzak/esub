@@ -172,9 +172,9 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
         nproc = main_nproc
 
     if system == 'bsub':
-        resource_string = '-n {} -W {} -R rusage[mem={}] -R rusage[scratch={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch)
+        resource_string = '-n {} -W {} -R rusage[mem={}] -R rusage[scratch={}] -R span[ptile={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch, nproc)
 
-    return resource_string
+    return resource_string, nproc
 
 
 def get_log_filenames(log_dir, job_name, function):
@@ -252,11 +252,11 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     """
 
     # allocate computing resources
-    resource_string = make_resource_string(function, 
-                                           main_memory, main_time, main_scratch, main_nproc, 
-                                           watchdog_memory, watchdog_time, watchdog_scratch, watchdog_nproc,
-                                           merge_memory, merge_time, merge_scratch, merge_nproc, 
-                                           system)
+    resource_string, omp_num_threads = make_resource_string(function, 
+                                                            main_memory, main_time, main_scratch, main_nproc, 
+                                                            watchdog_memory, watchdog_time, watchdog_scratch, watchdog_nproc,
+                                                            merge_memory, merge_time, merge_scratch, merge_nproc, 
+                                                            system)
 
     # get the job name for the submission system and the log files
     job_name_ext = job_name + '_' + function
@@ -283,7 +283,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                        resource_string, dependency, source_cmd, log_dir,
                        job_name, exe, tasks, main_name, args_string)
         else:
-            cmd_string = 'bsub -r -o {} -e {} -J {}[1-{}] {} {} \"{} python ' \
+            cmd_string = 'export OMP_NUM_THREADS={omp_num_threads}; bsub -r -o {} -e {} -J {}[1-{}] {} {} \"{} python ' \
                          '-m esub.submit_jobarray --job_name={} ' \
                          '--source_file={} --main_memory={} --main_time={} ' \
                          '--main_scratch={} --function={} ' \
