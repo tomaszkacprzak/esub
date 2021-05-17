@@ -283,7 +283,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                        resource_string, dependency, source_cmd, log_dir,
                        job_name, exe, tasks, main_name, args_string)
         else:
-            cmd_string = 'export OMP_NUM_THREADS={omp_num_threads}; bsub -r -o {} -e {} -J {}[1-{}] {} {} \"{} python ' \
+            cmd_string = 'bsub -r -o {} -e {} -J {}[1-{}] {} {} \"{} python ' \
                          '-m esub.submit_jobarray --job_name={} ' \
                          '--source_file={} --main_memory={} --main_time={} ' \
                          '--main_scratch={} --function={} ' \
