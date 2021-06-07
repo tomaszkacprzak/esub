@@ -172,7 +172,7 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
         nproc = main_nproc
 
     if system == 'bsub':
-        resource_string = '-n {} -W {} -R rusage[mem={}] -R rusage[scratch={}] -R span[ptile={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch, nproc)
+        resource_string = '-n {} -We {} -R rusage[mem={}] -R rusage[scratch={}] -R span[ptile={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch, nproc)
 
     return resource_string, nproc
 
