@@ -209,7 +209,7 @@ def get_parameters(step):
 
 
 def process_item(step, job_dict, index=-1, loop_dependence=None,
-                 parameters=None, assert_ids=True, verb=False, jc_flow=False):
+                 parameters=None, assert_ids=True, verb=False):
     """
     Processes one of the epipe items in the pipeline
 
@@ -256,9 +256,7 @@ def process_item(step, job_dict, index=-1, loop_dependence=None,
     if in_loop:
         job_name = '{}__{}'.format(job_name, index)
         base_cmd = format_loop_cmd(base_cmd, index)
-        base_cmd += ' -jc'
-    else:
-        base_cmd += ' -jc'
+
     # submit the job
     LOGGER.info('Submitting job {}'.format(job_name))
     cmd = make_submit_command(base_cmd, job_name, deps, job_dict, parameters)
@@ -292,15 +290,13 @@ def main(args=None):
                               testing.')
     parser.add_argument('-v', '--verb', action='store', type=bool, default=True,
                         help='If to show esub output.')
-    parser.add_argument('-jc', '--jobchainer_flow', action='store_true',
-                    help='add --jobchainer_flow to all jobs.')
 
 
     args = parser.parse_args(args)
     pipeline = args.pipeline
     assert_ids = not args.ignore_jobid_errors
     verb=args.verb
-    jc_flow=args.jobchainer_flow
+    
 
     # read pipeline file
     with open(pipeline, 'r') as f:
@@ -341,7 +337,7 @@ def main(args=None):
                 for item in step['items']:
                     process_item(item, job_dict, index=index,
                                  loop_dependence=deps, parameters=parameters,
-                                 assert_ids=assert_ids, verb=verb, jc_flow=jc_flow)
+                                 assert_ids=assert_ids, verb=verb)
             # find the names of the newly submitted jobs
             loop_jobs = set(job_dict.keys()) - submitted_jobs
 
@@ -358,7 +354,7 @@ def main(args=None):
                 assert_ids = not args.ignore_jobid_errors
        
             process_item(step, job_dict, parameters=parameters,
-                         assert_ids=assert_ids, verb=verb, jc_flow=jc_flow)
+                         assert_ids=assert_ids, verb=verb)
 
     LOGGER.info('Submission finished')
 
