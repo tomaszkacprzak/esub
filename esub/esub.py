@@ -883,8 +883,6 @@ def main(args=None):
     parser.add_argument('--n_rerun_missing', type=int, default=0,
                         help='Number of reruns of the missing indices')
     parser.add_argument('--merge_depenency_mode', type=str, default='after'),
-    parser.add_argument('-jc', '--jobchainer_flow', action='store_true',
-                        help='Use jobchainer submission flow')
     args, function_args = parser.parse_known_args(args)
 
     # mode = args.mode
@@ -942,20 +940,15 @@ def main(args=None):
 
     # get indices
 
-    if args.jobchainer_flow == True:
-
-        if not os.path.isfile(args.tasks):
-            indices = utils.get_indices(args.tasks)
-        else:
-            indices = utils.read_indices_yaml(args.tasks)
-
-        filepath_indices = utils.get_filepath_indices(args)
-        utils.write_indices_yaml(filepath_indices, indices)
-        args.tasks = filepath_indices
-
-    else:
-
+    if not os.path.isfile(args.tasks):
         indices = utils.get_indices(args.tasks)
+    else:
+        indices = utils.read_indices_yaml(args.tasks)
+
+    filepath_indices = utils.get_filepath_indices(args)
+    utils.write_indices_yaml(filepath_indices, indices)
+    args.tasks = filepath_indices
+
 
     # fix main time
 
