@@ -57,7 +57,7 @@ def decimal_hours_to_str(dec_hours):
 
     return time_str
 
-def get_jobchainer_function_flow(args):
+def get_jobchainer_function_flow(args, executable):
     """
     Gets the configuration for jobchainer flow submission.
     :param args: Command line arguments are parsed
@@ -83,6 +83,13 @@ def get_jobchainer_function_flow(args):
     filepath_indices = utils.get_filepath_indices(args)
     indices = utils.read_indices_yaml(filepath_indices)
 
+    if hasattr(executable, 'preprocess'):
+        main_dep = 'preprocess0'
+        main_start = """numended({jid:s},*)"""
+    else:
+        main_dep = ''
+        main_start = ''
+
     if args.merge_depenency_mode == 'after':
         merge_start = """numended({jid:s},*)"""
         if args.n_rerun_missing==0:
@@ -98,7 +105,9 @@ def get_jobchainer_function_flow(args):
 
     if args.function == 'all':
 
-        list_functions['main0']  = {'fun': 'main',   'dep': '', 'start': '', 'ncor': args.n_cores, 'find': filepath_indices}
+        if hasattr(executable, 'preprocess'):
+            list_functions['preprocess0'] = {'fun': 'preprocess',  'dep': '', 'start': '', 'ncor': 1, 'find': filepath_indices}
+        list_functions['main0']  = {'fun': 'main',   'dep': main_dep, 'start': main_start, 'ncor': args.n_cores, 'find': filepath_indices}
         add_reruns(args.n_rerun_missing)
         list_functions['merge0'] = {'fun': 'merge',  'dep': merge_dep, 'start': merge_start, 'ncor': 1, 'find': filepath_indices}
 
@@ -106,7 +115,7 @@ def get_jobchainer_function_flow(args):
 
         for fun in args.function:
 
-            if fun == 'missing' or fun == 'merge' :
+            if fun in ['missing', 'merge', 'preprocess']:
                 nc = 1
             elif fun == 'main':
                 nc = args.n_cores
@@ -120,7 +129,7 @@ def get_jobchainer_function_flow(args):
 
 
 
-def make_resource_string(function, main_memory, main_time, main_scratch, main_nproc, watchdog_memory, watchdog_time, watchdog_scratch, watchdog_nproc, merge_memory, merge_time, merge_scratch, merge_nproc, system):
+def make_resource_string(function, main_memory, main_time, main_scratch, main_nproc, preprocess_memory, preprocess_time, preprocess_scratch, preprocess_nproc, merge_memory, merge_time, merge_scratch, merge_nproc, system):
     """
     Creates the part of the submission string which handles
     the allocation of ressources
@@ -130,9 +139,9 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
     :param main_memory: Memory per core to allocate for the main job
     :param main_time: The Wall time requested for the main job
     :param main_scratch: Scratch per core to allocate for the main job
-    :param watchdog_memory: Memory per core to allocate for the watchdog job
-    :param watchdog_time: The Wall time requested for the watchdog job
-    :param watchdog_scratch: Scratch to allocate for the watchdog job
+    :param preprocess_memory: Memory per core to allocate for the preprocess job
+    :param preprocess_time: The Wall time requested for the preprocess job
+    :param preprocess_scratch: Scratch to allocate for the preprocess job
     :param merge_memory: Memory per core to allocate for the merge job
     :param merge_time: The Wall time requested for the merge job
     :param merge_scratch: Scratch to allocate for the merge job
@@ -145,11 +154,11 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
         time = main_time
         scratch = main_scratch
         nproc = main_nproc
-    elif function == 'watchdog':
-        mem = watchdog_memory
-        time = watchdog_time
-        scratch = watchdog_scratch
-        nproc = watchdog_nproc
+    elif function == 'preprocess':
+        mem = preprocess_memory
+        time = preprocess_time
+        scratch = preprocess_scratch
+        nproc = preprocess_nproc
     elif function == 'merge':
         mem = merge_memory
         time = merge_time
@@ -216,8 +225,8 @@ def get_source_cmd(source_file):
 
 def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                     function_args, exe, main_memory, main_time,
-                    main_scratch, main_nproc, watchdog_time, watchdog_memory,
-                    watchdog_scratch, watchdog_nproc, merge_memory, merge_time,
+                    main_scratch, main_nproc, preprocess_time, preprocess_memory,
+                    preprocess_scratch, preprocess_nproc, merge_memory, merge_time,
                     merge_scratch, merge_nproc, log_dir, dependency,
                     system, main_name='main', log_filenames=[]):
     """
@@ -238,9 +247,9 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     :param main_memory: Memory per core to allocate for the main job
     :param main_time: The Wall time requested for the main job
     :param main_scratch: Scratch per core to allocate for the main job
-    :param watchdog_memory: Memory per core to allocate for the watchdog job
-    :param watchdog_time: The Wall time requested for the watchdog job
-    :param watchdog_scratch: Scratch to allocate for the watchdog job
+    :param preprocess_memory: Memory per core to allocate for the preprocess job
+    :param preprocess_time: The Wall time requested for the preprocess job
+    :param preprocess_scratch: Scratch to allocate for the preprocess job
     :param merge_memory: Memory per core to allocate for the merge job
     :param merge_time: The Wall time requested for the merge job
     :param log_dir: log_dir: The path to the log directory
@@ -254,7 +263,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     # allocate computing resources
     resource_string, omp_num_threads = make_resource_string(function, 
                                                             main_memory, main_time, main_scratch, main_nproc, 
-                                                            watchdog_memory, watchdog_time, watchdog_scratch, watchdog_nproc,
+                                                            preprocess_memory, preprocess_time, preprocess_scratch, preprocess_nproc,
                                                             merge_memory, merge_time, merge_scratch, merge_nproc, 
                                                             system)
 
@@ -300,8 +309,8 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
 
 def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
                source_file='', n_cores=1, job_name='job', main_memory=100,
-               main_time=1, main_nproc=1, main_scratch=1000, watchdog_memory=100,
-               watchdog_time=1, watchdog_scratch=1000, watchdog_nproc=1, merge_memory=100,
+               main_time=1, main_nproc=1, main_scratch=1000, preprocess_memory=100,
+               preprocess_time=1, preprocess_scratch=1000, preprocess_nproc=1, merge_memory=100,
                merge_time=1, merge_scratch=1000, merge_nproc=1, dependency='', system='bsub',
                main_name='main', log_filenames=[]):
     """
@@ -323,9 +332,9 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
     :param main_memory: Memory per core to allocate for the main job
     :param main_time: The Wall time requested for the main job
     :param main_scratch: Scratch per core to allocate for the main job
-    :param watchdog_memory: Memory per core to allocate for the watchdog job
-    :param watchdog_time: The Wall time requested for the watchdog job
-    :param watchdog_scratch: Scratch to allocate for the watchdog job
+    :param preprocess_memory: Memory per core to allocate for the preprocess job
+    :param preprocess_time: The Wall time requested for the preprocess job
+    :param preprocess_scratch: Scratch to allocate for the preprocess job
     :param merge_memory: Memory per core to allocate for the merge job
     :param merge_time: The Wall time requested for the merge job
     :param merge_scratch: Scratch to allocate for the merge job
@@ -339,13 +348,11 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
     cmd_string = make_cmd_string(function, source_file, n_cores, tasks, mode,
                                  job_name, function_args, exe,
                                  main_memory, main_time, main_scratch, main_nproc,
-                                 watchdog_time, watchdog_memory, watchdog_scratch, watchdog_nproc,
+                                 preprocess_time, preprocess_memory, preprocess_scratch, preprocess_nproc,
                                  merge_memory, merge_time, merge_scratch, merge_nproc,
                                  log_dir, dependency, system, main_name, log_filenames)
 
-    LOGGER.info(
-        "####################### Submitting command to queing system "
-        "#######################")
+    LOGGER.info( "####################### Submitting command to queing system #######################")
     LOGGER.info(cmd_string)
 
     # message the system sends if the
@@ -406,72 +413,7 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
     return jobid
 
 
-def get_dependency_string(function, jobids, ext_dependencies, system):
-    """
-    Constructs the dependency string which handles which other jobs
-    this job is dependent on.
 
-    :param function: The type o function to submit
-    :param jobids: Dictionary of the jobids for each job already submitted
-    :param ext_dependencies: If external dependencies are given they get
-                             added to the dependency string
-                             (this happens if epipe is used)
-    :param system: The type of the queing system of the cluster
-    :return: A sting which is used as a substring for the submission string
-             and it handles the dependencies of the job
-    """
-    if system == 'bsub':
-        dep_string = '-w "'
-        # no dependencies for main
-        if function == 'main':
-            if ext_dependencies != '':
-                dep_string = '"-w' + ext_dependencies + '"'
-            else:
-                dep_string = ''
-            return dep_string
-        # watchdog starts along with main
-        elif function == 'watchdog':
-            if 'main' in jobids.keys():
-                dep_string += '{}({})'.format('started', jobids['main'])
-            else:
-                LOGGER.info("Function {} has not been submitted -> Skipping "
-                            "in dependencies for {}".format('main', function))
-        # rerun missing starts after main
-        elif function == 'rerun_missing':
-            if 'main' in jobids.keys():
-                dep_string += '{}({})'.format('ended', jobids['main'])
-            else:
-                LOGGER.info("Function {} has not been submitted -> Skipping "
-                            "in dependencies for {}".format('main', function))
-        # merge starts after all the others
-        elif function == 'merge':
-            if 'main' in jobids.keys():
-                dep_string += '{}({}) && '.format('ended', jobids['main'])
-            else:
-                LOGGER.info("Function {} has not been submitted -> Skipping "
-                            "in dependencies for {}".format('main', function))
-            if 'watchdog' in jobids.keys():
-                dep_string += '{}({}) && '.format('ended', jobids['watchdog'])
-            else:
-                LOGGER.info("Function {} has not been submitted -> Skipping "
-                            "in dependencies for {}".format('watchdog',
-                                                            function))
-            if 'rerun_missing' in jobids.keys():
-                dep_string += '{}({}) && '.format('ended',
-                                                  jobids['rerun_missing'])
-            else:
-                LOGGER.info("Function {} has not been submitted -> Skipping "
-                            "in dependencies for {}".format('rerun_missing',
-                                                            function))
-            if len(dep_string) > 4:
-                dep_string = dep_string[:-4]
-        else:
-            raise ValueError("Dependencies for function {} "
-                             "not defined".format(function))
-        if ext_dependencies != '':
-            dep_string = dep_string + " && " + ext_dependencies
-        dep_string += '"'
-    return dep_string
 
 def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources):
     """
@@ -499,7 +441,7 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
 
 
 
-    list_functions = get_jobchainer_function_flow(args)
+    list_functions = get_jobchainer_function_flow(args, executable)
 
     # CASE 1 : run locally
     if (args.mode == 'run'):
@@ -522,18 +464,14 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
 
             if dc['fun'] == 'main':
 
-                for index in getattr(executable, args.main_name)(indices, function_args):
+                for index in getattr(executable, 'main')(indices, function_args):
                     LOGGER.info("##################### Finished Task {} #####################".format(index))
 
             elif dc['fun'] == 'missing':
 
-                indices_missing = getattr(executable, dc['fun'])(indices, function_args)
+                indices_missing = getattr(executable, 'missing')(indices, function_args)
                 filepath_indices_rerun = utils.get_filepath_indices_rerun(args)
                 utils.write_indices_yaml(filepath_indices_rerun, indices_missing)
-
-            elif dc['fun'] == 'merge':
-
-                getattr(executable, dc['fun'])(indices, function_args)
 
             else:
 
@@ -545,6 +483,7 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
     elif (args.mode == 'jobarray'):
 
         jobids = collections.OrderedDict()
+        print(list_functions)
 
         for ii, item_name in enumerate(list_functions):
 
@@ -567,14 +506,17 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
             dep_string = finalise_deps(dep_string)
 
 
-            jobid = submit_job(dc['find'], args.mode, args.exec, log_dir, function_args,
+            jobid = submit_job(tasks=dc['find'], 
+                               mode=args.mode, 
+                               exe=args.exec, 
+                               log_dir=log_dir, 
+                               function_args=function_args,
                                function=dc['fun'],
                                source_file=args.source_file,
                                n_cores=dc['ncor'],
                                job_name=args.job_name,
                                dependency=dep_string,
                                system=args.system,
-                               main_name=args.main_name,
                                log_filenames=[stdout_log, stderr_log],
                                **resources)
 
@@ -582,191 +524,6 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
             # LOGGER.critical("Submitted job {} for function {} as jobid {}".format(item_name, dc['fun'], jobid))
             print("Submitted job {} for function {} as jobid {}".format(item_name, dc['fun'], jobid))
 
-def run_esub_flow(args, executable, function_args, path_finished, log_dir, path_log, resources):
-    """
-    Run the specifications for run_esub_flow flow.
-
-    :param args: Command line arguments are parsed
-    :executable: Executable to be run
-    :function_args: Function args to be passed to executable
-    :path_finished: file holding finished indices
-    :log_dir: directory for logs
-    :path_log: path to log file
-    :resources: dict with resources
-    """
-
-    mode = args.mode
-    main_name = args.main_name
-    job_name = args.job_name
-    source_file = args.source_file
-    tasks = args.tasks
-    exe = args.exec
-    n_cores = args.n_cores
-    function = args.function
-    system = args.system
-    ext_dependencies = args.dependency
-
-    # check if required function exists. Otherwise skip it
-    overwrite_log = False
-    if function == 'all':
-        # overwrite log files
-        overwrite_log = True
-        if mode == 'mpi':
-            function = ['main', 'watchdog', 'merge']
-        else:
-            function = ['main', 'rerun_missing', 'watchdog', 'merge']
-    for func in function:
-        if func == 'rerun_missing':
-            continue
-        elif func == 'main':
-            if not hasattr(executable, main_name):
-                LOGGER.info(
-                    "Did not find main function {} in the executable. "
-                    "Skipping it...".format(main_name))
-                function.remove(func)
-        else:
-            if not hasattr(executable, func):
-                LOGGER.info(
-                    "Did not find function {} in the executable. "
-                    "Skipping it...".format(func))
-                function.remove(func)
-    if len(function) == 0:
-        LOGGER.info("No funciton to run found. Exiting...")
-        sys.exit(0)
-
-    # CASE 1 : run locally
-    if (mode == 'run') | (mode == 'run-mpi') | (mode == 'run-tasks'):
-        LOGGER.info("Running the function(s) {} "
-                    "specified in executable".format(
-                        ', '.join(function)))
-
-        # getting index list
-        indices = utils.get_indices(tasks)
-        LOGGER.info("Running on tasks: {}".format(indices))
-
-        # loop over functions
-        for f in function:
-
-            indices_use = indices
-
-            # check if function is specified
-            if f == 'main' or f == 'rerun_missing':
-                function_found = hasattr(executable, main_name)
-            else:
-                function_found = hasattr(executable, f)
-
-            if not function_found:
-                LOGGER.info(
-                    "The requested function {} is missing in the executable. "
-                    "Skipping...".format(f))
-                continue
-
-            if f == 'main':
-                # resetting missing file
-                LOGGER.info("Resetting file holding finished indices")
-                utils.robust_remove(path_finished)
-
-            if f == 'rerun_missing':
-                indices_use = utils.check_indices(
-                    indices, path_finished, executable, function_args, LOGGER)
-                if len(indices_use) > 0:
-                    LOGGER.info("Rerunning tasks: {}".format(indices_use))
-                    f = 'main'
-                else:
-                    LOGGER.info('All indices are finished, nothing to re-run.')
-                    continue
-
-            if f == 'main':
-
-                if mode == 'run':
-                    for index in getattr(executable, main_name)(indices,
-                                                                function_args):
-                        utils.write_index(index, path_finished)
-                        LOGGER.info(
-                            "##################### Finished Task {} "
-                            "#####################".format(index))
-
-                elif mode == 'run-mpi':
-                    utils.run_local_mpi_job(
-                        exe, n_cores, function_args, LOGGER, main_name)
-                    LOGGER.info(
-                        "##################### Finished "
-                        "#####################")
-
-                elif mode == 'run-tasks':
-                    dones = utils.run_local_mpi_tasks(
-                        executable, n_cores, function_args, tasks, main_name,
-                        LOGGER)
-                    for index in dones:
-                        utils.write_index(index, path_finished)
-                        LOGGER.info(
-                            "##################### Finished Task {} "
-                            "#####################".format(index))
-
-            else:
-                getattr(executable, f)(indices_use, function_args)
-
-
-    # CASE 2 and 3 : running jobs on cluster (MPI or jobarray)
-    elif (mode == 'jobarray') | (mode == 'mpi'):
-        jobids = collections.OrderedDict()
-        for ii, f in enumerate(function):
-            if f == 'main' or f == 'rerun_missing':
-                function_found = hasattr(executable, main_name)
-            else:
-                function_found = hasattr(executable, f)
-
-            if not function_found:
-                LOGGER.info(
-                    "The requested function {} is missing in the executable. "
-                    "Skipping...".format(f))
-                continue
-
-            if f == 'main':
-                # resetting missing file
-                LOGGER.info("Resetting file holding finished indices")
-                utils.robust_remove(path_finished)
-                n_cores_use = n_cores
-            else:
-                n_cores_use = 1
-
-            LOGGER.info(
-                "Submitting {} job to {} core(s)".format(f, n_cores_use))
-
-            # reset logs
-            LOGGER.info('Resetting log files')
-            stdout_log, stderr_log = get_log_filenames(log_dir, job_name, f)
-            utils.robust_remove(stdout_log)
-            utils.robust_remove(stderr_log)
-
-            # the current job depends at most on the previous one
-            # (e.g., rerun_missing does not need to wait for the
-            # watchdog to finish)
-            dependency = get_dependency_string(f, jobids, ext_dependencies,
-                                               system)
-
-            jobid = submit_job(tasks, mode, exe, log_dir, function_args,
-                               function=f,
-                               source_file=source_file,
-                               n_cores=n_cores_use,
-                               job_name=job_name,
-                               dependency=dependency,
-                               system=system,
-                               main_name=main_name,
-                               **resources)
-            jobids[f] = jobid
-            LOGGER.info(
-                "Submitted job for function {} as jobid {}".format(f, jobid))
-
-        # write to log
-        if overwrite_log:
-            utils.write_to_log(
-                path_log, 'esub arguments: \n{}'.format(args), mode='w')
-            utils.write_to_log(
-                path_log, 'function arguments: \n{}'.format(function_args))
-
-        for fun, jobid in jobids.items():
-            utils.write_to_log(path_log, 'Job id {}: {}'.format(fun, jobid))
 
 def main(args=None):
     """
@@ -794,19 +551,18 @@ def main(args=None):
                      main_time_per_index=None,
                      main_scratch=2000,
                      main_nproc=1,
-                     watchdog_memory=1000,
-                     watchdog_time=4,
-                     watchdog_scratch=2000,
-                     watchdog_nproc=1,
+                     preprocess_memory=1000,
+                     preprocess_time=4,
+                     preprocess_scratch=2000,
+                     preprocess_nproc=1,
                      merge_memory=1000,
                      merge_time=4,
                      merge_scratch=2000,
                      merge_nproc=1)
 
     # parse all the submitter arguments
-    parser.add_argument(
-        'exec', type=str, help='path to the executable (python file '
-                               'containing functions main, watchdog, merge)')
+    parser.add_argument('exec', type=str, help='path to the executable (python file '
+                        'containing functions main, preprocess, merge)')
     parser.add_argument('--mode', type=str, default='run',
                         choices=('run', 'jobarray', 'mpi',
                                  'run-mpi', 'run-tasks'),
@@ -837,18 +593,18 @@ def main(args=None):
     parser.add_argument('--main_nproc', type=float,
                         default=resources['main_nproc'],
                         help='Number of processors for each task for the main job')
-    parser.add_argument('--watchdog_memory', type=float,
-                        default=resources['watchdog_memory'],
-                        help='Memory allocated per core for watchdog job in MB')
-    parser.add_argument('--watchdog_time', type=float,
-                        default=resources['watchdog_time'],
-                        help='Job run time limit in hours for watchdog job')
-    parser.add_argument('--watchdog_scratch', type=float,
-                        default=resources['watchdog_scratch'],
-                        help='Local scratch for allocated for watchdog job')
-    parser.add_argument('--watchdog_nproc', type=float,
-                        default=resources['watchdog_nproc'],
-                        help='Number of processors for each task for the watchdog job')
+    parser.add_argument('--preprocess_memory', type=float,
+                        default=resources['preprocess_memory'],
+                        help='Memory allocated per core for preprocess job in MB')
+    parser.add_argument('--preprocess_time', type=float,
+                        default=resources['preprocess_time'],
+                        help='Job run time limit in hours for preprocess job')
+    parser.add_argument('--preprocess_scratch', type=float,
+                        default=resources['preprocess_scratch'],
+                        help='Local scratch for allocated for preprocess job')
+    parser.add_argument('--preprocess_nproc', type=float,
+                        default=resources['preprocess_nproc'],
+                        help='Number of processors for each task for the preprocess job')
     parser.add_argument('--merge_memory', type=float,
                         default=resources['merge_memory'],
                         help='Memory allocated per core for merge job in MB')
@@ -862,11 +618,9 @@ def main(args=None):
                         default=resources['merge_nproc'],
                         help='Number of processors for each task for the merge job')
     parser.add_argument('--function', type=str, default=['main'], nargs='+',
-                        choices=('main', 'watchdog', 'merge', 'missing', 'rerun_missing', 'all'),
+                        choices=('main', 'preprocess', 'merge', 'missing', 'rerun_missing', 'all'),
                         help='The functions that should be executed. '
-                        'Choices: main, watchdog, merge, rerun_missing, all')
-    parser.add_argument('--main_name', type=str, default='main',
-                        help='Name of the main function in the executable')
+                        'Choices: main, preprocess, merge, rerun_missing, all')
     parser.add_argument('--tasks', type=str, default='0',
                         help='Task string from which the indices are parsed. '
                              'Either single index, list of indices or range '
@@ -885,16 +639,6 @@ def main(args=None):
     parser.add_argument('--merge_depenency_mode', type=str, default='after'),
     args, function_args = parser.parse_known_args(args)
 
-    # mode = args.mode
-    # main_name = args.main_name
-    # job_name = args.job_name
-    # source_file = args.source_file
-    # tasks = args.tasks
-    # exe = args.exec
-    # n_cores = args.n_cores
-    # function = args.function
-    # system = args.system
-    # ext_dependencies = args.dependency
     args.submit_dir = os.getcwd()
 
     if len(args.function) == 1 and args.function[0] == 'all':
