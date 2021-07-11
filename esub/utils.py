@@ -17,7 +17,16 @@ from functools import partial
 import numpy as np
 import yaml
 
+def set_logger_level(logger, level):
 
+    logging_levels = {'critical': logging.CRITICAL,
+                      'error': logging.ERROR,
+                      'warning': logging.WARNING,
+                      'info': logging.INFO,
+                      'debug': logging.DEBUG}
+
+    logger.setLevel(logging_levels[level])
+    
 def get_logger(filepath, logging_level=None):
     """
     Get logger, if logging_level is unspecified, then try using the environment variable PYTHON_LOGGER_LEVEL.
