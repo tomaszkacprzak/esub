@@ -26,14 +26,17 @@ TIMEOUT_MESSAGE = 'Maximum number of pending jobs reached, ' \
 
 
 def starter_message():
-    print()
-    print(' ______   _______   _    _   _______ ')
-    print('|  ____| |  _____| | |  | | |  _    |')
-    print('| |___   | |_____  | |  | | | |_|  _|')
-    print('|  ___|  |_____  | | |  | | |  _  |_ ')
-    print('| |____   _____| | | |__| | | |_|   |')
-    print('|______| |_______| \\______/ |_______|')
-    print()
+
+    msg = """
+    ███████╗███████╗██╗   ██╗██████╗ 
+    ██╔════╝██╔════╝██║   ██║██╔══██╗
+    █████╗  ███████╗██║   ██║██████╔╝
+    ██╔══╝  ╚════██║██║   ██║██╔══██╗
+    ███████╗███████║╚██████╔╝██████╔╝
+    ╚══════╝╚══════╝ ╚═════╝ ╚═════╝ 
+    """
+    print(msg)
+                
 
 
 def decimal_hours_to_str(dec_hours):
@@ -573,7 +576,7 @@ def main(args=None):
                         help='Individual name for this job. CAUTION: '
                              'Multiple jobs with same name'
                              'can confuse system!')
-    parser.add_argument('--source_file', type=str, default='source_esub.sh',
+    parser.add_argument('--source_file', type=str, default='activate.sh',
                         help='Optionally provide a source file which '
                         'gets executed first (loading modules, '
                         'declaring environemental variables and so on')
