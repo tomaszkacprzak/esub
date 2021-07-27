@@ -576,7 +576,7 @@ def main(args=None):
                         help='Individual name for this job. CAUTION: '
                              'Multiple jobs with same name'
                              'can confuse system!')
-    parser.add_argument('--source_file', type=str, default='activate.sh',
+    parser.add_argument('--source_file', type=str, default='activate',
                         help='Optionally provide a source file which '
                         'gets executed first (loading modules, '
                         'declaring environemental variables and so on')
@@ -651,10 +651,13 @@ def main(args=None):
     if os.path.isfile(args.exec):
         if not os.path.isabs(args.exec):
             args.exec = os.path.join(os.getcwd(), args.exec)
+    elif 'SUBMIT_DIR' in os.environ:
+        args.exec = os.path.join(os.environ['SUBMIT_DIR'], args.exec)
     else:
         raise FileNotFoundError('Please specify a valid path for executable')
 
     starter_message()
+    LOGGER.info('using executable {}'.format(args.exec))
 
     # Set path to log file and to file storing finished main job ids
     path_log = utils.get_path_log(log_dir, args.job_name)
