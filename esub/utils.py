@@ -17,26 +17,42 @@ from functools import partial
 import numpy as np
 import yaml
 
+def set_logger_level(logger, level):
 
-def get_logger(filepath):
-    """
-    Returns a logger with a specific output format
+    logging_levels = {'critical': logging.CRITICAL,
+                      'error': logging.ERROR,
+                      'warning': logging.WARNING,
+                      'info': logging.INFO,
+                      'debug': logging.DEBUG}
 
-    :param filepath: path of the file using the logger
-    :return: logger
+    logger.setLevel(logging_levels[level])
+    
+def get_logger(filepath, logging_level=None):
     """
-    logger_name = '{:>10}'.format(os.path.basename(filepath)[:10])
+    Get logger, if logging_level is unspecified, then try using the environment variable PYTHON_LOGGER_LEVEL.
+    Defaults to info.
+    :param filepath: name of the file that is calling the logger, used to give it a name.
+    :return: logger object
+    """
+
+    if logging_level is None:
+        if 'PYTHON_LOGGER_LEVEL' in os.environ:
+            logging_level = os.environ['PYTHON_LOGGER_LEVEL']
+        else:
+            logging_level = 'info'
+
+    logger_name = '{:>12}'.format(os.path.basename(filepath)[:12])
     logger = logging.getLogger(logger_name)
-    log_formatter = logging.Formatter("%(asctime)s %(name)0.10s "
-                                      "%(levelname)0.3s   %(message)s ",
-                                      "%y-%m-%d %H:%M:%S")
-    stream_handler = logging.StreamHandler(sys.stdout)
-    stream_handler.setFormatter(log_formatter)
-    logger.addHandler(stream_handler)
-    logger.propagate = False
-    logger.setLevel(logging.INFO)
-    return logger
 
+    if len(logger.handlers) == 0:
+        log_formatter = logging.Formatter(fmt="%(asctime)s %(name)0.12s %(levelname).3s   %(message)s ",  datefmt="%y-%m-%d %H:%M:%S", style='%')
+        stream_handler = logging.StreamHandler(sys.stdout)
+        stream_handler.setFormatter(log_formatter)
+        logger.addHandler(stream_handler)
+        logger.propagate = False
+        set_logger_level(logger, logging_level)
+
+    return logger
 
 LOGGER = get_logger(__file__)
 
