@@ -113,7 +113,11 @@ def get_jobchainer_function_flow(args, executable):
         list_functions['main0']  = {'fun': 'main',   'dep': main_dep, 'start': main_start, 'ncor': args.n_cores, 'find': filepath_indices}
         add_reruns(args.n_rerun_missing)
         list_functions['merge0'] = {'fun': 'merge',  'dep': merge_dep, 'start': merge_start, 'ncor': 1, 'find': filepath_indices}
-
+    
+    elif args.function == 'main+merge':
+        list_functions['main0']  = {'fun': 'main',   'dep': '', 'start': '', 'ncor': args.n_cores, 'find': filepath_indices}
+        add_reruns(args.n_rerun_missing)
+        list_functions['merge0'] = {'fun': 'merge',  'dep': merge_dep, 'start': merge_start, 'ncor': 1, 'find': filepath_indices}
     else:
 
         for fun in args.function:
@@ -621,7 +625,7 @@ def main(args=None):
                         default=resources['merge_nproc'],
                         help='Number of processors for each task for the merge job')
     parser.add_argument('--function', type=str, default=['main'], nargs='+',
-                        choices=('main', 'preprocess', 'merge', 'missing', 'rerun_missing', 'all'),
+                        choices=('main', 'preprocess', 'merge', 'missing', 'rerun_missing', 'all', 'main+merge'),
                         help='The functions that should be executed. '
                         'Choices: main, preprocess, merge, rerun_missing, all')
     parser.add_argument('--tasks', type=str, default='0',
@@ -644,8 +648,9 @@ def main(args=None):
 
     args.submit_dir = os.getcwd()
 
-    if len(args.function) == 1 and args.function[0] == 'all':
-        args.function = 'all'
+    if len(args.function) == 1:
+        if args.function[0] == 'all':  args.function = 'all'
+        if args.function[0] == 'main+merge':  args.function = 'main+merge'
 
     # Make sure that executable exits
     if os.path.isfile(args.exec):

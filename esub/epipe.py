@@ -266,6 +266,21 @@ def process_item(step, job_dict, index=-1, loop_dependence=None,
     job_dict[job_name] = new_ids
 
 
+def remove_commented_steps(pipeline):
+
+    pipeline_ = []
+    for step in pipeline:
+        if not step['skip']:
+            pipeline_ += [step]
+    return pipeline_
+        
+def add_pipeline_defaults(pipeline):
+
+    for step in pipeline:
+        step.setdefault('skip', False)
+        if step['name'].startswith('//'):
+            step['skip'] = True
+
 def main(args=None):
 
     """
@@ -303,7 +318,8 @@ def main(args=None):
     # read pipeline file
     with open(pipeline, 'r') as f:
         pipeline = yaml.load(f, Loader=yaml.FullLoader)
-
+    add_pipeline_defaults(pipeline)
+    pipeline = remove_commented_steps(pipeline)
     starter_message()
 
     # parse all the jobs and their dependencies from the pipeline string
