@@ -54,16 +54,17 @@ path_finished = utils.get_path_finished_indices(log_dir, job_name)
 if system == 'bsub':
     rank = int(os.environ['LSB_JOBINDEX'])
     rank -= 1
+elif system == 'slurm':
+    rank = int(os.environ['SLURM_ARRAY_TASK_ID'])
+
 
 # Import the executable
 executable = utils.import_executable(exe)
 
 if function == 'main':
-    LOGGER.info(
-        'Running the function {} specified in executable'.format(main_name))
+    LOGGER.info('Running the function {} specified in executable'.format(main_name))
 else:
-    LOGGER.info(
-        'Running the function {} specified in executable'.format(function))
+    LOGGER.info('Running the function {} specified in executable'.format(function))
 
 if function == 'rerun_missing':
     LOGGER.info('Checking if all main jobs terminated correctly...')
@@ -104,14 +105,10 @@ if function == 'rerun_missing':
 
         # run last job locally to not waste any resources
         index = indices_missing[-1]
-        LOGGER.info(
-            '##################### Starting Task {}\
-             #####################'.format(index))
+        LOGGER.info('##################### Starting Task {} #####################'.format(index))
         for index in getattr(executable, main_name)([index], function_args):
             utils.write_index(index, path_finished)
-        LOGGER.info(
-            '##################### Finished Task {}\
-             #####################'.format(index))
+        LOGGER.info('##################### Finished Task {} #####################'.format(index))
 
         if len(indices_missing) == 1:
             utils.write_to_log(path_log, 'First index is done')
@@ -145,8 +142,7 @@ else:
         for index in getattr(executable, main_name)(indices, function_args):
             utils.write_index(index, path_finished)
             LOGGER.info(
-                '##################### Finished Task {}\
-                 #####################'.format(index))
+                '##################### Finished Task {} #####################'.format(index))
 
             if is_first:
                 utils.write_to_log(path_log, 'First index is done')
@@ -161,9 +157,7 @@ else:
 
     else:
         utils.write_to_log(path_log, 'Running {}'.format(function))
-        LOGGER.info('Running {}, {} task(s), \
-                    first: {}, last: {}'.format(function, len(indices),
-                                                indices[0], indices[-1]))
+        LOGGER.info('Running {}, {} task(s), first: {}, last: {}'.format(function, len(indices), indices[0], indices[-1]))
         getattr(executable, function)(indices, function_args)
         utils.write_to_log(path_log, 'Finished running {}'.format(function))
 

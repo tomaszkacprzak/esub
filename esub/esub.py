@@ -189,6 +189,10 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
 
     if system == 'bsub':
         resource_string = '-n {} -We {} -R rusage[mem={}] -R rusage[scratch={}] -R span[ptile={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch, nproc)
+    elif system == 'slurm':
+        import ipdb; ipdb.set_trace()
+        resource_string = ' --time={} --mem-per-cpu={} '.format(decimal_hours_to_str(time), mem)
+
 
     return resource_string, nproc
 
@@ -311,6 +315,11 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                        function, exe, tasks, n_cores, log_dir,
                        system, main_name, args_string)
 
+    elif system == 'slurm':
+
+        import ipdb; ipdb.set_trace()
+        pass
+
     return cmd_string
 
 
@@ -367,6 +376,8 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
     if system == 'bsub':
         msg_limit_reached = 'Pending job threshold reached.'
         pipe_limit_reached = 'stderr'
+    elif system == 'slurm':
+        pass
 
     # submit
     while True:
