@@ -187,10 +187,9 @@ def make_resource_string(function, main_memory, main_time, main_scratch, main_np
         scratch = main_scratch
         nproc = main_nproc
 
-    if system == 'bsub':
+    if system == 'lsf':
         resource_string = '-n {} -We {} -R rusage[mem={}] -R rusage[scratch={}] -R span[ptile={}]'.format(nproc, decimal_hours_to_str(time), mem, scratch, nproc)
     elif system == 'slurm':
-        import ipdb; ipdb.set_trace()
         resource_string = ' --time={} --mem-per-cpu={} '.format(decimal_hours_to_str(time), mem)
 
 
@@ -293,7 +292,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     # make submission string
     source_cmd = get_source_cmd(source_file)
 
-    if system == 'bsub':
+    if system == 'lsf':
         if (mode == 'mpi') & (function == 'main'):
             cmd_string = 'bsub -o {} -e {} -J {} -n {} {} {} \"{} mpirun ' \
                 'python -m esub.submit_mpi --log_dir={} ' \
@@ -317,8 +316,53 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
 
     elif system == 'slurm':
 
-        import ipdb; ipdb.set_trace()
-        pass
+        if (mode == 'mpi') & (function == 'main'):
+            cmd_string = 'sbatch {} submit.slurm'.format(dependency)
+
+            extra_args = f'--job_name={job_name} --executable={exe} --tasks=\'{tasks}\' --log_dir={log_dir} --main_name={main_name} {args_string}'
+
+            with open('submit.slurm', 'w+') as f:
+                f.write('#! /bin/bash \n#\n')
+                f.write('#SBATCH --output={} \n'.format(stdout_log))
+                f.write('#SBATCH --error={} \n'.format(stderr_log))
+                f.write('#SBATCH --job-name={} \n'.format(job_name_ext))
+                f.write('#SBATCH --ntasks={} \n'.format(n_cores))
+                # for arg in add_args: f.write('#SBATCH {} \n'.format(arg))
+                import ipdb; ipdb.set_trace()
+                f.write(resource_string)
+                if len(source_cmd) > 0: f.write('srun {} \n'.format(source_cmd))
+                f.write(f'srun mpirun python -m esub.submit_jobarray {source_cmd} {extra_args}')
+        else:
+            cmd_string = 'sbatch {} submit.slurm'.format(dependency)
+
+            extra_args = f'--job_name={job_name} '\
+                         f'--source_file={os.path.abspath(os.path.expanduser(source_file))} '\
+                         f'--main_memory={main_memory} '\
+                         f'--main_time={main_time} ' \
+                         f'--main_scratch={main_scratch} '\
+                         f'--function={function} '\
+                         f'--executable={exe} '\
+                         f'--tasks=\'{tasks}\' '\
+                         f'--n_cores={n_cores} ' \
+                         f'--log_dir={log_dir} '\
+                         f'--system={system} '\
+                         f'--main_name={main_name} '\
+                         f'{args_string}'
+
+            with open('submit.slurm', 'w+') as f:
+                f.write(f'#! /bin/bash \n#\n')
+                f.write(f'#SBATCH --output={stdout_log} \n')
+                f.write(f'#SBATCH --error={stderr_log} \n')
+                f.write(f'#SBATCH --job-name={job_name_ext} \n')
+                f.write(f'#SBATCH --ntasks=1 \n')
+                # for arg in add_args: f.write('#SBATCH {} \n'.format(arg))
+                f.write(f'#SBATCH --array=1-{n_cores} \n')
+                for r in resource_string.split(' '):
+                    if len(r.strip())>0:
+                        f.write(f'#SBATCH {r} \n')
+                if len(source_cmd) > 0: f.write('srun {} \n'.format(source_cmd))
+                f.write(f'srun python -m esub.submit_jobarray {extra_args} \n')
+
 
     return cmd_string
 
@@ -373,16 +417,20 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
 
     # message the system sends if the
     # maximum number of pendings jobs is reached
-    if system == 'bsub':
+    if system == 'lsf':
         msg_limit_reached = 'Pending job threshold reached.'
         pipe_limit_reached = 'stderr'
     elif system == 'slurm':
-        pass
+        # TODO: to be filled in for slurm
+        msg_limit_reached = 'Pending job threshold reached.'
+        pipe_limit_reached = 'stderr'
 
     # submit
     while True:
 
         output = dict(stdout=[], stderr=[])
+
+        print(cmd_string)
 
         with subprocess.Popen(shlex.split(cmd_string),
                               stdout=subprocess.PIPE,
@@ -390,6 +438,7 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
                               bufsize=1,
                               universal_newlines=True) as proc:
 
+            pending_limit_reached = False
             # check for limit concerning maximum number of pending jobs
             for line in getattr(proc, pipe_limit_reached):
 
@@ -416,16 +465,16 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main',
 
     # check if process terminated successfully
     if proc.returncode != 0:
-        raise RuntimeError('Running the command \"{}\" failed with'
-                           'exit code {}. Error: \n{}'.
-                           format(cmd_string, proc.returncode,
-                                  '\n'.join(output['stderr'])))
+        raise RuntimeError('Running the command \"{}\" failed with exit code {}. Error: \n{}'.format(cmd_string, proc.returncode, '\n'.join(output['stderr'])))
 
     # get id of submitted job (bsub-only up to now)
-    jobid = output['stdout'][-1].split('<')[1]
-    jobid = jobid.split('>')[0]
-    jobid = int(jobid)
-
+    if system == 'lsf':
+        jobid = output['stdout'][-1].split('<')[1]
+        jobid = jobid.split('>')[0]
+        jobid = int(jobid)
+    elif system == 'slurm':
+        jobid = int(output['stdout'][-1].strip().split(' ')[-1])
+        
     LOGGER.info("Submitted job and got jobid: {}".format(jobid))
 
     return jobid
@@ -648,10 +697,10 @@ def main(args=None):
     parser.add_argument('--dependency', type=str, default='',
                         help='A dependency string that gets added to the '
                              'dependencies (meant for pipelining)')
-    parser.add_argument('--system', type=str, default='bsub',
-                        choices=('bsub',),
+    parser.add_argument('--system', type=str, default='lsf',
+                        choices=('lsf', 'slurm'),
                         help='Type of the queing system '
-                             '(so far only know bsub)')
+                             '(so far only know lsf, slurm)')
     parser.add_argument('--n_rerun_missing', type=int, default=0,
                         help='Number of reruns of the missing indices')
     parser.add_argument('--merge_depenency_mode', type=str, default='after'),
