@@ -51,11 +51,13 @@ path_log = utils.get_path_log(log_dir, job_name)
 path_finished = utils.get_path_finished_indices(log_dir, job_name)
 
 # get rank of the processor
-if system == 'bsub':
+if system == 'lsf':
     rank = int(os.environ['LSB_JOBINDEX'])
     rank -= 1
 elif system == 'slurm':
     rank = int(os.environ['SLURM_ARRAY_TASK_ID'])
+:else
+    raise Exception(f'system {system} not supported')
 
 
 # Import the executable
