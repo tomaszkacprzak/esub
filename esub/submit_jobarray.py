@@ -56,7 +56,7 @@ if system == 'lsf':
     rank -= 1
 elif system == 'slurm':
     rank = int(os.environ['SLURM_ARRAY_TASK_ID'])
-:else
+else:
     raise Exception(f'system {system} not supported')
 
 
