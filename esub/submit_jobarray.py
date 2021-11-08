@@ -29,13 +29,13 @@ parser.add_argument('--system', type=str, required=True)
 args, function_args = parser.parse_known_args()
 
 # get rank of the processor
-if system == 'lsf':
+if args.system == 'lsf':
     rank = int(os.environ['LSB_JOBINDEX'])
     rank -= 1
 elif args.system == 'slurm':
     rank = int(os.environ['SLURM_ARRAY_TASK_ID'])
 else:
-    raise Exception(f'system {system} not supported')
+    raise Exception(f'system {args.system} not supported')
 
 
 # Import the executable

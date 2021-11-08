@@ -217,6 +217,22 @@ def decimal_hours_to_str(dec_hours):
 
     return time_str
 
+def get_depstr_formats(system):
+
+    depstr = {}
+
+    if system == 'lsf':
+        depstr['ended_all'] = """numended({jid:s},*)"""
+        depstr['ended_run_any'] = """(numended({jid:s}, > 0) || numrun({jid:s}, > 0))"""
+
+    elif system == 'slurm':
+
+        depstr['ended_all'] = """afterany:{jid:s}"""
+        depstr['ended_run_any'] = """after:{jid:s}"""
+
+    return depstr
+
+
 def get_jobchainer_function_flow(args, executable):
     """
     Gets the configuration for jobchainer flow submission.
@@ -234,10 +250,11 @@ def get_jobchainer_function_flow(args, executable):
         import numpy as np
         n_cores_rerun = int(np.ceil(args.n_cores*0.1))
         for nr in range(1, n_rerun+1):
-            list_functions['missing{:d}'.format(nr)] = {'fun': 'missing',  'dep': 'main{:d}'.format(nr-1), 'start': """numended({jid:s},*)""", 'ncor': 1, 'find': filepath_indices}
+            list_functions['missing{:d}'.format(nr)] = {'fun': 'missing',  'dep': 'main{:d}'.format(nr-1), 'start': depstr['ended_all'], 'ncor': 1, 'find': filepath_indices}
             filepath_indices_rerun = utils.get_filepath_indices_rerun(args)
-            list_functions['main{:d}'.format(nr)] =   {'fun': 'main',     'dep': 'missing{:d}'.format(nr), 'start': """numended({jid:s},*)""", 'ncor': n_cores_rerun, 'find': filepath_indices_rerun}
+            list_functions['main{:d}'.format(nr)] =   {'fun': 'main',     'dep': 'missing{:d}'.format(nr), 'start': depstr['ended_all'], 'ncor': n_cores_rerun, 'find': filepath_indices_rerun}
 
+    depstr = get_depstr_formats(args.system)
     list_functions = collections.OrderedDict()
 
     filepath_indices = utils.get_filepath_indices(args)
@@ -245,20 +262,20 @@ def get_jobchainer_function_flow(args, executable):
 
     if hasattr(executable, 'preprocess'):
         main_dep = 'preprocess0'
-        main_start = """numended({jid:s},*)"""
+        main_start = depstr['ended_all']
     else:
         main_dep = ''
         main_start = ''
 
     if args.merge_depenency_mode == 'after':
-        merge_start = """numended({jid:s},*)"""
+        merge_start = depstr['ended_all']
         if args.n_rerun_missing==0:
             merge_dep = 'main0'
         else:
             merge_dep = 'main{:d}'.format(args.n_rerun_missing)
 
     elif args.merge_depenency_mode == 'along':
-        merge_start = """(numended({jid:s}, > 0) || numrun({jid:s}, > 0))"""
+        merge_start = depstr['ended_run_any']
         merge_dep = 'main0'
     else:
         raise Exception('unknown args.merge_depenency_mode={}'.format(args.merge_depenency_mode))
