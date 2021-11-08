@@ -15,8 +15,112 @@ import shlex
 import yaml
 
 from esub import utils, esub
+from esub.esub import set_batch_system
 
 LOGGER = utils.get_logger(__file__)
+
+def main(args=None):
+
+    """
+    epipe main function. Accepts a epipe yaml
+    configuration file and runs the pipeline.
+
+    :param args: Command line arguments
+    """
+
+    if args is None:
+        args = sys.argv[1:]
+
+    description = "This is epipe a tool to easily submit\
+                   pipelines to a clusters queing system"
+    parser = argparse.ArgumentParser(description=description, add_help=True)
+    # parse all the submitter arguments
+    parser.add_argument('pipeline', type=str, action='store',
+                        help='Path to the pipeline file. Format should be as\
+                              specified in the epipe example. Check\
+                              Documentations.')
+    parser.add_argument('--ignore_jobid_errors', action='store_true',
+                        help='Switches off check whether ids of submitted\
+                              jobs were successfully obtained, useful for\
+                              testing.')
+    parser.add_argument('-v', '--verb', action='store', type=bool, default=True,
+                        help='If to show esub output.')
+    parser.add_argument('--system', type=str, default='detect',
+                        choices=('detect', 'lsf', 'slurm'),
+                        help='Type of the queing system '
+                             '(so far only know lsf, slurm)')
+
+
+    args = parser.parse_args(args)
+    pipeline = args.pipeline
+    assert_ids = not args.ignore_jobid_errors
+    verb=args.verb
+    
+
+    # read pipeline file
+    with open(pipeline, 'r') as f:
+        pipeline = yaml.load(f, Loader=yaml.FullLoader)
+    add_pipeline_defaults(pipeline)
+    pipeline = remove_commented_steps(pipeline)
+    starter_message()
+    set_batch_system(args)
+
+    # parse all the jobs and their dependencies from the pipeline string
+    job_dict = {}
+
+    LOGGER.info('Starting submission')
+    print()
+
+    parameters = None
+
+    for step in pipeline:
+        if 'parameters' in step.keys():
+            LOGGER.info("Found parameter object")
+            parameters = get_parameters(step)
+            LOGGER.info("Have set global parameters as {}".format(parameters))
+            continue
+
+        if 'loop' in step.keys():
+
+            loop_indices = list(step['loop'])
+            deps = []
+            # get the names of all jobs that have been
+            # submitted before the loop
+            submitted_jobs = set(job_dict.keys())
+
+            if 'dep' in step.keys():
+                step['dep'] = str(step['dep'])
+                dependencies = step['dep'].replace(' ', '').split(',')
+                for dep in dependencies:
+                    deps.append(dep)
+
+            for index in range(loop_indices[0], loop_indices[1]):
+                for item in step['items']:
+                    process_item(item, job_dict, index=index,
+                                 loop_dependence=deps, parameters=parameters,
+                                 assert_ids=assert_ids, verb=verb, system=args.system)
+            # find the names of the newly submitted jobs
+            loop_jobs = set(job_dict.keys()) - submitted_jobs
+
+            # add the loop as a whole to the job dictionary
+            job_dict[step['name']] = []
+            for loop_job in loop_jobs:
+                job_dict[step['name']] += job_dict[loop_job]
+
+        else:
+
+            if 'assert_ids' in step.keys():
+                assert_ids = step['assert_ids']
+            else:
+                assert_ids = not args.ignore_jobid_errors
+       
+            process_item(step, job_dict, parameters=parameters,
+                         assert_ids=assert_ids, verb=verb, system=args.system)
+
+    LOGGER.info('Submission finished')
+
+
+
 
 def starter_message():
 
@@ -77,7 +181,7 @@ def represents_int(s):
         return False
 
 
-def make_submit_command(base_cmd, name, deps, job_dict, parameters):
+def make_submit_command(base_cmd, name, deps, job_dict, parameters, system='lsf'):
     """
     Adds the dependencies to the base command given in the pipeline
     Also tries to replace variables indicated by [] brackets.
@@ -103,7 +207,10 @@ def make_submit_command(base_cmd, name, deps, job_dict, parameters):
                  Ignoring dependencies on it".format(dep))
             continue
         for job_id in job_ids:
-            dep_string += 'ended({}) && '.format(int(job_id))
+            if system=='lsf':
+                dep_string += 'ended({}) && '.format(int(job_id))
+            elif system=='slurm':
+                dep_string += 'afterany:{} && '.format(int(job_id))
     dep_string = dep_string[:-4]
     dep_string = '"' + dep_string + '"'
 
@@ -211,7 +318,7 @@ def get_parameters(step):
 
 
 def process_item(step, job_dict, index=-1, loop_dependence=None,
-                 parameters=None, assert_ids=True, verb=False):
+                 parameters=None, assert_ids=True, verb=False, system='lsf'):
     """
     Processes one of the epipe items in the pipeline
 
@@ -261,7 +368,7 @@ def process_item(step, job_dict, index=-1, loop_dependence=None,
 
     # submit the job
     LOGGER.info('Submitting job {}'.format(job_name))
-    cmd = make_submit_command(base_cmd, job_name, deps, job_dict, parameters)
+    cmd = make_submit_command(base_cmd, job_name, deps, job_dict, parameters, system)
     new_ids = submit(cmd, assert_ids=assert_ids, verb=verb)
     job_dict[job_name] = new_ids
 
@@ -280,101 +387,6 @@ def add_pipeline_defaults(pipeline):
         step.setdefault('skip', False)
         if step['name'].startswith('//'):
             step['skip'] = True
-
-def main(args=None):
-
-    """
-    epipe main function. Accepts a epipe yaml
-    configuration file and runs the pipeline.
-
-    :param args: Command line arguments
-    """
-
-    if args is None:
-        args = sys.argv[1:]
-
-    description = "This is epipe a tool to easily submit\
-                   pipelines to a clusters queing system"
-    parser = argparse.ArgumentParser(description=description, add_help=True)
-    # parse all the submitter arguments
-    parser.add_argument('pipeline', type=str, action='store',
-                        help='Path to the pipeline file. Format should be as\
-                              specified in the epipe example. Check\
-                              Documentations.')
-    parser.add_argument('--ignore_jobid_errors', action='store_true',
-                        help='Switches off check whether ids of submitted\
-                              jobs were successfully obtained, useful for\
-                              testing.')
-    parser.add_argument('-v', '--verb', action='store', type=bool, default=True,
-                        help='If to show esub output.')
-
-
-    args = parser.parse_args(args)
-    pipeline = args.pipeline
-    assert_ids = not args.ignore_jobid_errors
-    verb=args.verb
-    
-
-    # read pipeline file
-    with open(pipeline, 'r') as f:
-        pipeline = yaml.load(f, Loader=yaml.FullLoader)
-    add_pipeline_defaults(pipeline)
-    pipeline = remove_commented_steps(pipeline)
-    starter_message()
-
-    # parse all the jobs and their dependencies from the pipeline string
-    job_dict = {}
-
-    LOGGER.info('Starting submission')
-    print()
-
-    parameters = None
-
-    for step in pipeline:
-        if 'parameters' in step.keys():
-            LOGGER.info("Found parameter object")
-            parameters = get_parameters(step)
-            LOGGER.info("Have set global parameters as {}".format(parameters))
-            continue
-
-        if 'loop' in step.keys():
-
-            loop_indices = list(step['loop'])
-            deps = []
-            # get the names of all jobs that have been
-            # submitted before the loop
-            submitted_jobs = set(job_dict.keys())
-
-            if 'dep' in step.keys():
-                step['dep'] = str(step['dep'])
-                dependencies = step['dep'].replace(' ', '').split(',')
-                for dep in dependencies:
-                    deps.append(dep)
-
-            for index in range(loop_indices[0], loop_indices[1]):
-                for item in step['items']:
-                    process_item(item, job_dict, index=index,
-                                 loop_dependence=deps, parameters=parameters,
-                                 assert_ids=assert_ids, verb=verb)
-            # find the names of the newly submitted jobs
-            loop_jobs = set(job_dict.keys()) - submitted_jobs
-
-            # add the loop as a whole to the job dictionary
-            job_dict[step['name']] = []
-            for loop_job in loop_jobs:
-                job_dict[step['name']] += job_dict[loop_job]
-
-        else:
-
-            if 'assert_ids' in step.keys():
-                assert_ids = step['assert_ids']
-            else:
-                assert_ids = not args.ignore_jobid_errors
-       
-            process_item(step, job_dict, parameters=parameters,
-                         assert_ids=assert_ids, verb=verb)
-
-    LOGGER.info('Submission finished')
 
 
 if __name__ == '__main__':
