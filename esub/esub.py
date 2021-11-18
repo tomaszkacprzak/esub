@@ -186,13 +186,13 @@ def get_resources(args, executable, function_args, indices):
 
     del resources['main_time_per_index']
 
-    resources['pass'] = {}
+
+    resources.setdefault('pass', {})
     if args.batch_args_pass is not None:
         for arg in args.batch_args_pass.split(','):
             key, val = arg.split('=')
             resources['pass'][key] = val
             LOGGER.debug(f'added resource {key}={val}')
-
     return resources
 
 
