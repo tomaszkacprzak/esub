@@ -371,7 +371,7 @@ def make_resource_string(function, resources, system):
 
     elif system == 'slurm':
         resource_string = f' --time={int(time*60)} --mem-per-cpu={mem} --cpus-per-task={nproc} ' # in minutes
-        if ngpu >0:
+        if str(ngpu) != '0':
             resource_string += f'--gpus={ngpu} '\
                                f'--gpus-per-task={ngpu} '
 
