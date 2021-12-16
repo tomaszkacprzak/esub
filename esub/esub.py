@@ -186,8 +186,11 @@ def get_resources(args, executable, function_args, indices):
 
     del resources['main_time_per_index']
 
-
+    # add defaults
+    resources.setdefault('main_nsimult', None)
     resources.setdefault('pass', {})
+
+    # add pass args
     if args.batch_args_pass is not None:
         for arg in args.batch_args_pass.split(','):
             key, val = arg.split('=')
@@ -327,12 +330,14 @@ def make_resource_string(function, resources, system):
         scratch = resources['main_scratch']
         nproc = resources['main_nproc']
         ngpu = resources['main_ngpu']
-    
+        str_nsimult = ''  if resources['main_nsimult'] is None else f"%{resources['main_nsimult']}"
+
     elif function == 'preprocess':
         mem = resources['preprocess_memory']
         time = resources['preprocess_time']
         scratch = resources['preprocess_scratch']
         nproc = resources['preprocess_nproc']
+        str_nsimult = None
     
     elif function == 'merge':
         mem = resources['merge_memory']
@@ -340,6 +345,7 @@ def make_resource_string(function, resources, system):
         scratch = resources['merge_scratch']
         nproc = resources['merge_nproc']
         ngpu = resources['merge_ngpu']
+        str_nsimult = None
     
     elif function == 'rerun_missing':
         mem = resources['main_memory']
@@ -347,11 +353,13 @@ def make_resource_string(function, resources, system):
         scratch = resources['main_scratch']
         nproc = resources['main_nproc']
         ngpu = resources['main_ngpu']
+        str_nsimult = resources['main_nsimult']
     
     elif function == 'missing':
         mem = resources['merge_memory']
         time = resources['merge_time']
         scratch = resources['merge_scratch']
+        str_nsimult = None
         ngpu = 1
         nproc = 1
     
@@ -361,24 +369,25 @@ def make_resource_string(function, resources, system):
         scratch = resources['main_scratch']
         nproc = resources['main_nproc']
         ngpu = resources['main_ngpu']
+        str_nsimult = None
 
     if system == 'lsf':
-        resource_string = f'-n {nproc} '\
+        str_resources = f'-n {nproc} '\
                           f'-We {decimal_hours_to_str(time)} '\
                           f'-R rusage[mem={mem}] '\
                           f'-R rusage[scratch={scratch}] '\
                           f'-R span[ptile={nproc}]'
 
     elif system == 'slurm':
-        resource_string = f' --time={int(time*60)} --mem-per-cpu={mem} --cpus-per-task={nproc} ' # in minutes
+        str_resources = f' --time={int(time*60)} --mem-per-cpu={mem} --cpus-per-task={nproc} ' # in minutes
         if str(ngpu) != '0':
-            resource_string += f'--gpus={ngpu} '\
+            str_resources += f'--gpus={ngpu} '\
                                f'--gpus-per-task={ngpu} '
 
     for k, v in resources['pass'].items():
-        resource_string += f' --{k}={v} '
+        str_resources += f' --{k}={v} '
 
-    return resource_string, nproc
+    return str_resources, nproc, str_nsimult
 
 
 def get_log_filenames(log_dir, job_name, function):
@@ -452,7 +461,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     """
 
     # allocate computing resources
-    resource_string, omp_num_threads = make_resource_string(function, resources, system)
+    str_resources, omp_num_threads, str_nsimult = make_resource_string(function, resources, system)
 
     # get the job name for the submission system and the log files
     job_name_ext = job_name + '_' + function
@@ -476,7 +485,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                          f'-e {stderr_log} '\
                          f'-J {job_name_ext} '\
                          f'-n {n_cores} '\
-                         f'{resource_string} {dependency} \"{source_cmd} ' \
+                         f'{str_resources} {dependency} \"{source_cmd} ' \
                          f'mpirun python -m esub.submit_mpi '\
                          f'--log_dir={log_dir} ' \
                          f'--job_name={job_name} '\
@@ -484,11 +493,12 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                          f'--tasks=\'{tasks}\' ' \
                          f'{args_string}\"'
         else:
+
             cmd_string = f'bsub -r '\
                          f'-o {stdout_log} '\
                          f'-e {stderr_log} '\
-                         f'-J {job_name_ext}[1-{n_cores}] '\
-                         f'{resource_string} {dependency} \"{source_cmd} ' \
+                         f'-J {job_name_ext}[1-{n_cores}{str_nsimult}] '\
+                         f'{str_resources} {dependency} \"{source_cmd} ' \
                          f'python -m esub.submit_jobarray '\
                          f'--job_name={job_name} '\
                          f'--function={function} '\
@@ -511,7 +521,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                 f.write(f'#SBATCH --error={stderr_log}.%a \n')
                 f.write(f'#SBATCH --job-name={job_name_ext} \n')
                 f.write(f'#SBATCH --ntasks={n_cores} \n')
-                f.write(resource_string)
+                f.write(str_resources)
                 if len(source_cmd) > 0: f.write(f'srun {source_cmd} \n')
                 f.write(f'srun mpirun python -m esub.submit_jobarray {source_cmd} {extra_args}')
         else:
@@ -531,8 +541,8 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                 f.write(f'#SBATCH --error={stderr_log}.%a \n')
                 f.write(f'#SBATCH --job-name={job_name_ext} \n')
                 f.write(f'#SBATCH --ntasks=1 \n')
-                f.write(f'#SBATCH --array=0-{n_cores-1} \n')
-                for r in resource_string.split(' '):
+                f.write(f'#SBATCH --array=0-{n_cores-1}{str_nsimult} \n')
+                for r in str_resources.split(' '):
                     if len(r.strip())>0:
                         f.write(f'#SBATCH {r} \n')
                 if len(source_cmd) > 0: f.write(f'{source_cmd} \n')
