@@ -337,7 +337,7 @@ def make_resource_string(function, resources, system):
         time = resources['preprocess_time']
         scratch = resources['preprocess_scratch']
         nproc = resources['preprocess_nproc']
-        str_nsimult = None
+        str_nsimult = ''
     
     elif function == 'merge':
         mem = resources['merge_memory']
@@ -345,7 +345,7 @@ def make_resource_string(function, resources, system):
         scratch = resources['merge_scratch']
         nproc = resources['merge_nproc']
         ngpu = resources['merge_ngpu']
-        str_nsimult = None
+        str_nsimult = ''
     
     elif function == 'rerun_missing':
         mem = resources['main_memory']
@@ -359,7 +359,7 @@ def make_resource_string(function, resources, system):
         mem = resources['merge_memory']
         time = resources['merge_time']
         scratch = resources['merge_scratch']
-        str_nsimult = None
+        str_nsimult = ''
         ngpu = 1
         nproc = 1
     
@@ -369,7 +369,7 @@ def make_resource_string(function, resources, system):
         scratch = resources['main_scratch']
         nproc = resources['main_nproc']
         ngpu = resources['main_ngpu']
-        str_nsimult = None
+        str_nsimult = ''  if resources['main_nsimult'] is None else f"%{resources['main_nsimult']}"
 
     if system == 'lsf':
         str_resources = f'-n {nproc} '\
