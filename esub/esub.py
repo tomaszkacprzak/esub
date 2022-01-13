@@ -17,6 +17,7 @@ import collections
 import subprocess
 import shlex
 import time
+import copy
 
 from esub import utils
 
@@ -168,8 +169,7 @@ def starter_message():
                 
 def get_resources(args, function_args, indices):
 
-        # resources - copy defaults
-    resources = {k:v for k,v in RESOURCES_DEFAULT.items()}
+    resources = copy.deepcopy(RESOURCES_DEFAULT)
 
     # get resources from executable if implemented
     # if hasattr(executable, 'resources'):
@@ -180,7 +180,7 @@ def get_resources(args, function_args, indices):
     if True:
         res_func = utils.isolate_function(funcname='resources', filename=args.exec)
         res_update = res_func(function_args)
-        LOGGER.info('Got cluster resources from executable')
+        LOGGER.info(f'Got cluster resources from executable {args.exec} {res_update}')
         resources.update(res_update)
     # except Exception as err:
         # LOGGER.error(str(err))
@@ -524,7 +524,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     elif system == 'slurm':
 
         if (mode == 'mpi') & (function == 'main'):
-            cmd_string = 'sbatch {} submit.slurm'.format(dependency)
+            cmd_string = 'sbatch --cluster=all {} submit.slurm'.format(dependency)
 
             extra_args = f'--job_name={job_name} --executable={exe} --tasks=\'{tasks}\' --log_dir={log_dir} --main_name={main_name} {args_string}'
 
@@ -537,8 +537,9 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                 f.write(str_resources)
                 if len(source_cmd) > 0: f.write(f'srun {source_cmd} \n')
                 f.write(f'srun mpirun python -m esub.submit_jobarray {source_cmd} {extra_args}')
+
         else:
-            cmd_string = 'sbatch {} submit.slurm'.format(dependency)
+            cmd_string = 'sbatch --cluster=all {} submit.slurm'.format(dependency)
 
             extra_args = f'--job_name={job_name} '\
                          f'--function={function} '\
@@ -561,6 +562,9 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                 if len(source_cmd) > 0: f.write(f'{source_cmd} \n')
                 f.write(f'python -m esub.submit_jobarray {extra_args} \n')
 
+        # with open('submit.slurm', 'r') as f:
+        #     for l in f.readlines():
+        #         print(l)
 
     return cmd_string
 

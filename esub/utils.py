@@ -443,8 +443,9 @@ def isolate_function(funcname, filename, fname_temp_module='temp_module'):
 
     import importlib
     mymodule = importlib.import_module(fname_temp_module)
+    importlib.reload(mymodule)
     func = getattr(mymodule, funcname)
-    os.remove(f'{fname_temp_module}.py')
+    # os.remove(f'{fname_temp_module}.py')
     return func
 
 def get_module_functions_noimport(filename):
