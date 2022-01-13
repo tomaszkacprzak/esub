@@ -195,6 +195,10 @@ def make_submit_command(base_cmd, name, deps, job_dict, parameters, system='lsf'
     :return: Complete submission string
     """
 
+    # add job name
+    cmd = base_cmd + ' --job_name={}'.format(name) 
+
+    # get dependency string
     dep_string = ''
     for dep in deps:
         if represents_int(dep):
@@ -202,21 +206,22 @@ def make_submit_command(base_cmd, name, deps, job_dict, parameters, system='lsf'
         elif dep in job_dict.keys():
             job_ids = job_dict[dep]
         else:
-            LOGGER.info(
-                "Did not find a job named {}. \
-                 Ignoring dependencies on it".format(dep))
+            LOGGER.info("Did not find a job named {}. Ignoring dependencies on it".format(dep))
             continue
         for job_id in job_ids:
             if system=='lsf':
                 dep_string += 'ended({}) && '.format(int(job_id))
             elif system=='slurm':
-                dep_string += 'afterany:{} && '.format(int(job_id))
-    dep_string = dep_string[:-4]
-    dep_string = '"' + dep_string + '"'
+                dep_string += ':{}'.format(int(job_id))
 
-    cmd = base_cmd + ' --job_name={}'.format(name) 
-    if dep_string!='""':
-        cmd += ' --dependency={}'.format(dep_string)
+    # add dep string
+    if dep_string!='':
+        if system=='lsf':
+            dep_string = dep_string[:-4]
+            dep_string = '"' + dep_string + '"'
+            cmd += ' --dependency={}'.format(dep_string)
+        elif system=='slurm':
+            cmd += ' --dependency=afterany{}'.format(dep_string)
 
     # Attempt variable replacement
     while True:

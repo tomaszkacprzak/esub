@@ -743,6 +743,8 @@ def run_jobchainer_flow(args, function_args, path_finished, log_dir, resources):
 
                 getattr(executable, dc['fun'])(indices, function_args)
 
+        jobids = {}
+
 
 
     # CASE 2 and 3 : running jobs on cluster (jobarray)
