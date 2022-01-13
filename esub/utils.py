@@ -403,3 +403,61 @@ def read_indices_yaml(filepath_indices):
     LOGGER.info('read {} with {} indices'.format(filepath_indices, len(indices)))
     return indices
 
+
+def isolate_function(funcname, filename, fname_temp_module='temp_module'):
+
+    def get_fuction_source_code(funcname, source_code):
+
+        func_found = False
+        for i, line in enumerate(source_code):
+            if f'def {funcname}' in line:
+                LOGGER.debug(i, line)
+                first_line = i
+                func_found = True
+                break
+
+        assert func_found, f'function {funcname} not found in {filename}'
+
+        for i in range(first_line, len(source_code)):
+
+            line = source_code[i]
+
+            if 'return' in line:
+                LOGGER.debug(i, line)
+                last_line = i+1
+                break
+
+        return source_code[first_line:last_line]
+
+    def write_module_with_source(filename, source_code):
+
+        with open(f'{filename}.py', 'w') as f:
+            f.writelines(source_code)
+
+    with open(filename, 'r') as f:
+        source_code = f.readlines()
+
+    func_source_code = get_fuction_source_code(funcname=funcname, source_code=source_code)
+    write_module_with_source(filename=fname_temp_module, source_code=func_source_code)
+
+
+    import importlib
+    mymodule = importlib.import_module(fname_temp_module)
+    func = getattr(mymodule, funcname)
+    os.remove(f'{fname_temp_module}.py')
+    return func
+
+def get_module_functions_noimport(filename):
+
+    with open(filename, 'r') as f:
+        source_code = f.readlines()
+    
+    list_functions = []
+    for line in source_code:
+        if line.startswith('def '):
+            funcname = line.split('def ')[1].split('(')[0]
+            LOGGER.debug(f'found func {funcname} in  {filename}')
+            list_functions.append(funcname)
+
+    return list_functions
+

@@ -110,10 +110,11 @@ def main(args=None):
 
     # Make sure that executable exits
     if os.path.isfile(args.exec):
-        if not os.path.isabs(args.exec):
-            args.exec = os.path.join(os.getcwd(), args.exec)
-    elif 'SUBMIT_DIR' in os.environ:
-        args.exec = os.path.join(os.environ['SUBMIT_DIR'], args.exec)
+        pass
+    #     if not os.path.isabs(args.exec):
+    #         args.exec = os.path.join(os.getcwd(), args.exec)
+    # elif 'SUBMIT_DIR' in os.environ:
+    #     args.exec = os.path.join(os.environ['SUBMIT_DIR'], args.exec)
     else:
         raise FileNotFoundError('Please specify a valid path for executable')
 
@@ -129,18 +130,19 @@ def main(args=None):
     LOGGER.info("Running in mode {}".format(args.mode))
 
     # importing the functions from the executable
-    executable = utils.import_executable(args.exec)
+    # executable = utils.import_executable(args.exec)
 
     # run setup if implemented
-    if hasattr(executable, 'setup'):
-        LOGGER.info('Running setup from executable')
-        getattr(executable, 'setup')(function_args)
+    # if hasattr(executable, 'setup'):
+    #     LOGGER.info('Running setup from executable')
+    #     getattr(executable, 'setup')(function_args)
 
     # get indices
     indices = utils.read_indices_yaml(args.tasks) if os.path.isfile(args.tasks) else utils.get_indices(args.tasks)
 
     # resources - copy defaults
-    resources = get_resources(args, executable, function_args, indices)
+    # resources = get_resources(args, executable, function_args, indices)
+    resources = get_resources(args, function_args, indices)
 
     # store indices as file
     filepath_indices = utils.get_filepath_indices(args)
@@ -148,7 +150,8 @@ def main(args=None):
     args.tasks = filepath_indices
 
     # execute the function flow
-    run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources)
+    jobids = run_jobchainer_flow(args, function_args, path_finished, log_dir, resources)
+    return list(jobids.values())
 
 
 def starter_message():
@@ -163,16 +166,24 @@ def starter_message():
     """
     print(msg)
                 
-def get_resources(args, executable, function_args, indices):
+def get_resources(args, function_args, indices):
 
         # resources - copy defaults
     resources = {k:v for k,v in RESOURCES_DEFAULT.items()}
 
     # get resources from executable if implemented
-    if hasattr(executable, 'resources'):
-        LOGGER.info('Getting cluster resources from executable')
-        res_update = getattr(executable, 'resources')(function_args)
+    # if hasattr(executable, 'resources'):
+    #     LOGGER.info('Getting cluster resources from executable')
+    #     res_update = getattr(executable, 'resources')(function_args)
+    #     resources.update(res_update)
+    # try:
+    if True:
+        res_func = utils.isolate_function(funcname='resources', filename=args.exec)
+        res_update = res_func(function_args)
+        LOGGER.info('Got cluster resources from executable')
         resources.update(res_update)
+    # except Exception as err:
+        # LOGGER.error(str(err))
 
     # overwrite with non-default command-line input
     for res_name, res_default_val in resources.items():
@@ -236,7 +247,7 @@ def get_depstr_formats(system):
     return depstr
 
 
-def get_jobchainer_function_flow(args, executable):
+def get_jobchainer_function_flow(args):
     """
     Gets the configuration for jobchainer flow submission.
     :param args: Command line arguments are parsed
@@ -263,7 +274,9 @@ def get_jobchainer_function_flow(args, executable):
     filepath_indices = utils.get_filepath_indices(args)
     indices = utils.read_indices_yaml(filepath_indices)
 
-    if hasattr(executable, 'preprocess'):
+    list_funcs_noimport = utils.get_module_functions_noimport(args.exec)
+
+    if 'preprocess' in list_funcs_noimport:
         main_dep = 'preprocess0'
         main_start = depstr['ended_all']
     else:
@@ -285,7 +298,7 @@ def get_jobchainer_function_flow(args, executable):
 
     if args.function == 'all':
 
-        if hasattr(executable, 'preprocess'):
+        if 'preprocess' in list_funcs_noimport:
             list_functions['preprocess0'] = {'fun': 'preprocess',  'dep': '', 'start': '', 'ncor': 1, 'find': filepath_indices}
         list_functions['main0']  = {'fun': 'main',   'dep': main_dep, 'start': main_start, 'ncor': args.n_cores, 'find': filepath_indices}
         add_reruns(args.n_rerun_missing)
@@ -637,7 +650,7 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main', source
     if proc.returncode != 0:
         raise RuntimeError('Running the command \"{}\" failed with exit code {}. Error: \n{}'.format(cmd_string, proc.returncode, '\n'.join(output['stderr'])))
 
-    # get id of submitted job (bsub-only up to now)
+    # get id of submitted job
     if system == 'lsf':
         jobid = output['stdout'][-1].split('<')[1]
         jobid = jobid.split('>')[0]
@@ -652,12 +665,11 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main', source
 
 
 
-def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir, resources):
+def run_jobchainer_flow(args, function_args, path_finished, log_dir, resources):
     """
     Run the specifications for jobchainer flow.
 
     :param args: Command line arguments are parsed
-    :executable: Executable to be run
     :function_args: Function args to be passed to executable
     :path_finished: file holding finished indices
     :log_dir: directory for logs
@@ -693,10 +705,12 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
 
 
 
-    list_functions = get_jobchainer_function_flow(args, executable)
+    list_functions = get_jobchainer_function_flow(args)
 
     # CASE 1 : run locally
     if (args.mode == 'run'):
+
+        executable = utils.import_executable(args.exec)
 
         for ii, item_name in enumerate(list_functions):
 
@@ -774,6 +788,8 @@ def run_jobchainer_flow(args, executable, function_args, path_finished, log_dir,
             jobids[item_name] = jobid
             # LOGGER.critical("Submitted job {} for function {} as jobid {}".format(item_name, dc['fun'], jobid))
             print("Submitted job {} for function {} as jobid {}".format(item_name, dc['fun'], jobid))
+
+    return jobids
 
 def set_batch_system(args):
 
