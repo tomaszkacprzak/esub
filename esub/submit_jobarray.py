@@ -12,10 +12,13 @@ from __future__ import (print_function, division, absolute_import,
 import os
 import argparse
 import time
+import numpy as np
 from esub import esub, utils
 
 LOGGER = utils.get_logger(__file__)
 
+# sleep for a short time to avoid clashes in making dirs, etc
+time.sleep(np.random.uniform()*10+10)
 
 # parse all the submitter arguments
 parser = argparse.ArgumentParser()
@@ -25,7 +28,6 @@ parser.add_argument('--executable', type=str, required=True)
 parser.add_argument('--tasks', type=str, required=True)
 parser.add_argument('--n_cores', type=int, required=True)
 parser.add_argument('--system', type=str, required=True)
-
 args, function_args = parser.parse_known_args()
 
 # get rank of the processor
@@ -41,10 +43,10 @@ else:
 # Import the executable
 executable = utils.import_executable(args.executable)
 
-LOGGER.info('Running the function {} specified in executable'.format(args.function))
+LOGGER.info(f'Running function {args.function}')
 
 # Change to local scratch if set
-utils.cd_local_scratch()
+# utils.cd_local_scratch()
 
 # getting index list based on jobid
 indices = utils.get_indices_splitted(args.tasks, args.n_cores, rank)
