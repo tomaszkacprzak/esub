@@ -256,7 +256,7 @@ def submit(cmd, assert_ids=True, verb=False):
         ids = esub.main(args)
 
     else:
-        raise Exception('currently supporting runs of esub scripts only in epipe')
+        raise Exception(f'currently supporting runs of esub scripts only in epipe {cmd}')
 
 
     # with subprocess.Popen(shlex.split(cmd),
