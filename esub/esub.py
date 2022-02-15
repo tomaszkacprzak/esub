@@ -172,18 +172,20 @@ def get_resources(args, function_args, indices):
     resources = copy.deepcopy(RESOURCES_DEFAULT)
 
     # get resources from executable if implemented
-    # if hasattr(executable, 'resources'):
-    #     LOGGER.info('Getting cluster resources from executable')
-    #     res_update = getattr(executable, 'resources')(function_args)
-    #     resources.update(res_update)
-    # try:
-    if True:
+    
+    try: # try to isolate function
         res_func = utils.isolate_function(funcname='resources', filename=args.exec)
         res_update = res_func(function_args)
         LOGGER.info(f'Got cluster resources from executable {args.exec} {res_update}')
         resources.update(res_update)
-    # except Exception as err:
-        # LOGGER.error(str(err))
+
+    except Exception as err: # if isolation failed, run full import 
+        LOGGER.error(f'failed to isoltate resources function, running full import, errmsg={err}')
+        executable = utils.import_executable(args.exec)
+        if hasattr(executable, 'resources'):
+            LOGGER.info('Getting cluster resources from executable')
+            res_update = getattr(executable, 'resources')(function_args)
+            resources.update(res_update)
 
     # overwrite with non-default command-line input
     for res_name, res_default_val in resources.items():

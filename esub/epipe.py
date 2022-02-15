@@ -259,50 +259,6 @@ def submit(cmd, assert_ids=True, verb=False):
         raise Exception(f'currently supporting runs of esub scripts only in epipe {cmd}')
 
 
-    # with subprocess.Popen(shlex.split(cmd),
-    #                       stdout=subprocess.PIPE,
-    #                       stderr=subprocess.PIPE,
-    #                       bufsize=1,
-    #                       universal_newlines=True) as proc:
-
-    #     # read stdout
-    #     for line in proc.stdout:
-    #         stdout_lines.append(line)
-
-    #         if esub.TIMEOUT_MESSAGE in line:
-    #             LOGGER.info(esub.TIMEOUT_MESSAGE)
-
-    #     # read stderr
-    #     stderr = '\n'.join(proc.stderr)
-    #     for line in proc.stderr:
-    #         stderr_lines.append(line)
-
-    # if verb:
-    #     LOGGER.info('esub stdout:')
-    #     print(' '.join(stdout_lines))
-    #     LOGGER.info('esub stderr:')
-    #     print(' '.join(stderr_lines))
-
-
-    # # raise an exception in case the process did not terminate successfully
-    # if proc.returncode != 0:
-    #     raise RuntimeError('Running the command \"{}\" failed with\
-    #                         exit code {}. Error: \n{}'. format(cmd,
-    #                                                            proc.returncode,
-    #                                                            stderr))
-
-    # # get ids of newly submitted jobs
-    # last_line = stdout_lines[-1]
-
-    # ids = []
-    # for string in last_line.split(' '):
-    #     try:
-    #         int(string)
-    #         ids.append(string)
-    #     except ValueError:
-    #         pass
-
-
     if assert_ids:
         assert len(ids) > 0, 'Something went wrong, did not manage to get any job ids from stdout'
 
