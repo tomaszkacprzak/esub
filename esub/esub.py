@@ -619,8 +619,6 @@ def submit_job(tasks, mode, exe, log_dir, function_args, function='main', source
 
         output = dict(stdout=[], stderr=[])
 
-        print(cmd_string)
-
         with subprocess.Popen(shlex.split(cmd_string),
                               stdout=subprocess.PIPE,
                               stderr=subprocess.PIPE,
@@ -695,6 +693,8 @@ def run_jobchainer_flow(args, function_args, path_finished, log_dir, resources):
             if new_dep != '':
                 if dep_string == '':
                     dep_string += f' --dependency={new_dep}'
+                else:
+                    dep_string += f',{new_dep}'
 
         return dep_string
 
