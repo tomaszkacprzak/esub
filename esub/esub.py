@@ -394,7 +394,7 @@ def make_resource_string(function, resources, system):
                           f'-R span[ptile={nproc}]'
 
     elif system == 'slurm':
-        str_resources = f' --time={int(time*60)} --mem-per-cpu={mem} --cpus-per-task={nproc} ' # in minutes
+        str_resources = f' --time={int(time*60)} --mem={mem} --cpus-per-task={nproc} ' # in minutes
         if str(ngpu) != '0':
             str_resources += f'--gpus={ngpu} '\
                                f'--gpus-per-task={ngpu} '
@@ -526,7 +526,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
     elif system == 'slurm':
 
         if (mode == 'mpi') & (function == 'main'):
-            cmd_string = 'sbatch --cluster=all {} submit.slurm'.format(dependency)
+            cmd_string = 'sbatch  {} submit.slurm'.format(dependency)
 
             extra_args = f'--job_name={job_name} --executable={exe} --tasks=\'{tasks}\' --log_dir={log_dir} --main_name={main_name} {args_string}'
 
@@ -541,7 +541,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
                 f.write(f'srun mpirun python -m esub.submit_jobarray {source_cmd} {extra_args}')
 
         else:
-            cmd_string = 'sbatch --cluster=all {} submit.slurm'.format(dependency)
+            cmd_string = 'sbatch {} submit.slurm'.format(dependency)
 
             extra_args = f'--job_name={job_name} '\
                          f'--function={function} '\
