@@ -1,0 +1,12 @@
+--extra-index-url https://cosmo-pypi.phys.ethz.ch/simple/
+setuptools>=34.0.0
+pip>=9.0.0
+pytest
+pytest-cov
+pytest-regtest
+flake8
+pylint
+sphinx
+coverage
+sphinx-pynpoint-theme
+tox

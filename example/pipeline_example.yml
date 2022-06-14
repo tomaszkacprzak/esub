@@ -1,0 +1,44 @@
+# Copyright (C) 2019 ETH Zurich, Institute for Particle Physics and Astrophysics
+
+# Created on May 12
+# Author: Dominik Zuercher
+
+# pipeline_example.yml
+
+# This is an example for a pipeline which can be ran by epipe
+
+# In the parameters section one can define global variables. When submitting the jobs epipe will replace them in the commands (see below)
+- parameters:
+    - executable: exec_example.py
+    - source_file: source_file_example.sh
+
+# This is a job instance without dependencies (starts directly).
+- name: job1
+  cmd: esub $[executable] --tasks='0 > 5' --n_cores=3 --mode=jobarray --function=all --source_file=$[source_file]
+
+# This job only starts after job1 has finished (if dependencies are not found they are just ignored).
+- name: job2
+  cmd: esub $[executable] --tasks='0 > 5' --n_cores=3 --mode=jobarray --function=main --source_file=$[source_file]
+  dep: job1
+
+# This is a loop. All the jobs in the loop will be ran 3 times and the loop index can be passed to the jobs.
+- name: jobloop1
+  loop: [0, 3]
+  dep: job1, job2
+  items:
+    - name: loopjob1
+      cmd: esub $[executable] --tasks='0 > 5' --n_cores=3 --mode=jobarray --function=all --source_file=$[source_file]
+
+    # This job is an example of how the loop index can be used to format the submitted command. The commands that will
+    # actually be submitted are:
+    # 1) esub exec_example.py --tasks='0 > 0' --n_cores=3 --mode=jobarray --function=all --source_file=./source_file_example.sh
+    # 2) esub exec_example.py --tasks='0 > 1' --n_cores=3 --mode=jobarray --function=all --source_file=./source_file_example.sh
+    # 3) esub exec_example.py --tasks='0 > 2' --n_cores=3 --mode=jobarray --function=all --source_file=./source_file_example.sh
+    - name: loopjob2
+      cmd: esub $[executable] --tasks='0 > {}' --n_cores=3 --mode=jobarray --function=all --source_file=$[source_file]
+      dep: loopjob1
+
+# This is a job instance without dependencies (starts directly) using jobchainer flow.
+- name: job3
+  cmd: esub $[executable] --tasks='0 > 5' --n_cores=3 --mode=jobarray --function=all --source_file=$[source_file] -jc
+
