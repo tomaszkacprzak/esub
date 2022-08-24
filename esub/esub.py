@@ -512,7 +512,7 @@ def make_cmd_string(function, source_file, n_cores, tasks, mode, job_name,
             cmd_string = f'bsub -r '\
                          f'-o {stdout_log} '\
                          f'-e {stderr_log} '\
-                         f'-J {job_name_ext}[1-{n_cores}{str_nsimult}] '\
+                         f'-J {job_name_ext}[1-{n_cores}]{str_nsimult} '\
                          f'{str_resources} {dependency} \"{source_cmd} ' \
                          f'python -m esub.submit_jobarray '\
                          f'--job_name={job_name} '\
