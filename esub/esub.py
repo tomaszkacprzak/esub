@@ -394,7 +394,7 @@ def make_resource_string(function, resources, system):
                           f'-R span[ptile={nproc}]'
 
     elif system == 'slurm':
-        str_resources = f' --time={int(time*60)} --mem={mem} --cpus-per-task={nproc} ' # in minutes
+        str_resources = f' --time={int(time*60)} --mem-per-cpu={mem} --cpus-per-task={nproc} ' # in minutes
         if str(ngpu) != '0':
             str_resources += f'--gpus={ngpu} '\
                                f'--gpus-per-task={ngpu} '
